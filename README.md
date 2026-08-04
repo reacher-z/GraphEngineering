@@ -3,6 +3,16 @@
 </p>
 
 <p align="center">
+  <img src="docs/assets/demo.gif" alt="Animated demo: the research-diamond pattern fans three sources out concurrently, joins them at a barrier, and commits 24 events to a protected journal" width="100%">
+</p>
+
+<p align="center">
+  <sub>One real run of the <a href="examples/patterns/research-diamond/">research-diamond</a> pattern bundle.
+  Every frame is generated from its committed journal by <a href="tools/demo/">tools/demo</a> — nothing is hand-animated.
+  (<a href="docs/assets/demo.svg">Animated SVG version</a>.)</sub>
+</p>
+
+<p align="center">
   <a href="https://github.com/reacher-z/GraphEngineering/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/reacher-z/GraphEngineering/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/reacher-z/GraphEngineering/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/reacher-z/GraphEngineering/actions/workflows/codeql.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-22c55e.svg"></a>

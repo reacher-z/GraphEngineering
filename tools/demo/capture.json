@@ -1,0 +1,230 @@
+{
+  "capturedBy": "tools/demo/capture.mjs",
+  "source": "examples/patterns/research-diamond",
+  "runId": "research-diamond-bundle-001",
+  "question": "What does the durable scheduler guarantee when a run is resumed?",
+  "graphHash": "f266955aef97a44b8635271fa3c20ab2790abaa7a4815a08810d784c08eb2eef",
+  "nodes": [
+    "scope",
+    "source-code",
+    "source-docs",
+    "source-web",
+    "synthesize"
+  ],
+  "edges": [
+    [
+      "scope",
+      "source-code"
+    ],
+    [
+      "scope",
+      "source-docs"
+    ],
+    [
+      "scope",
+      "source-web"
+    ],
+    [
+      "source-code",
+      "synthesize"
+    ],
+    [
+      "source-docs",
+      "synthesize"
+    ],
+    [
+      "source-web",
+      "synthesize"
+    ]
+  ],
+  "parallelRun": {
+    "status": "succeeded",
+    "maxObservedConcurrency": 3,
+    "totalAttempts": 5,
+    "mockDispatches": 3
+  },
+  "durableRun": {
+    "status": "succeeded",
+    "committedEvents": 24,
+    "protectedPayloadBlobs": 12,
+    "plaintextLeaksInJournal": 0
+  },
+  "reportSummary": {
+    "acceptedClaims": 2,
+    "contradictions": 1,
+    "unsupportedClaims": 1,
+    "sourcesReporting": 3
+  },
+  "events": [
+    [
+      0,
+      "RunCreated",
+      null
+    ],
+    [
+      1,
+      "RunStarted",
+      null
+    ],
+    [
+      2,
+      "NodeScheduled",
+      "scope"
+    ],
+    [
+      3,
+      "NodeStarted",
+      "scope"
+    ],
+    [
+      4,
+      "NodeSucceeded",
+      "scope"
+    ],
+    [
+      5,
+      "EdgeEmitted",
+      "scope"
+    ],
+    [
+      6,
+      "EdgeEmitted",
+      "scope"
+    ],
+    [
+      7,
+      "EdgeEmitted",
+      "scope"
+    ],
+    [
+      8,
+      "NodeScheduled",
+      "source-code"
+    ],
+    [
+      9,
+      "NodeStarted",
+      "source-code"
+    ],
+    [
+      10,
+      "NodeScheduled",
+      "source-docs"
+    ],
+    [
+      11,
+      "NodeStarted",
+      "source-docs"
+    ],
+    [
+      12,
+      "NodeScheduled",
+      "source-web"
+    ],
+    [
+      13,
+      "NodeStarted",
+      "source-web"
+    ],
+    [
+      14,
+      "NodeSucceeded",
+      "source-code"
+    ],
+    [
+      15,
+      "EdgeEmitted",
+      "source-code"
+    ],
+    [
+      16,
+      "NodeSucceeded",
+      "source-docs"
+    ],
+    [
+      17,
+      "EdgeEmitted",
+      "source-docs"
+    ],
+    [
+      18,
+      "NodeSucceeded",
+      "source-web"
+    ],
+    [
+      19,
+      "EdgeEmitted",
+      "source-web"
+    ],
+    [
+      20,
+      "NodeScheduled",
+      "synthesize"
+    ],
+    [
+      21,
+      "NodeStarted",
+      "synthesize"
+    ],
+    [
+      22,
+      "NodeSucceeded",
+      "synthesize"
+    ],
+    [
+      23,
+      "RunSucceeded",
+      null
+    ]
+  ],
+  "trace": {
+    "scale": "journal sequence number, not wall clock",
+    "rows": [
+      {
+        "nodeId": "scope",
+        "span": [
+          3,
+          4
+        ],
+        "lane": "...==..................."
+      },
+      {
+        "nodeId": "source-code",
+        "span": [
+          9,
+          14
+        ],
+        "lane": ".........======........."
+      },
+      {
+        "nodeId": "source-docs",
+        "span": [
+          11,
+          16
+        ],
+        "lane": "...........======......."
+      },
+      {
+        "nodeId": "source-web",
+        "span": [
+          13,
+          18
+        ],
+        "lane": ".............======....."
+      },
+      {
+        "nodeId": "synthesize",
+        "span": [
+          21,
+          22
+        ],
+        "lane": ".....................==."
+      }
+    ],
+    "concurrentLanes": [
+      "source-code",
+      "source-docs",
+      "source-web"
+    ]
+  }
+}
