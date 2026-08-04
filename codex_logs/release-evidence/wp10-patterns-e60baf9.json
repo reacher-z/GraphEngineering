@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "task-source-candidate",
+  "recorded_at": "2026-08-04T19:18:00Z",
+  "tasks": [
+    "PATTERN-01-RESEARCH",
+    "PATTERN-10-ECOSYSTEM"
+  ],
+  "candidate": {
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "base_revision": "d242b65e6f5b8e77ab2ed5c4d09ea518d4af0d52",
+    "branch_at_recording": "feat/authoring-foundation"
+  },
+  "landing_commits": [
+    {
+      "revision": "1938d46b16ab2c35e5f82997f1890fbccff8631a",
+      "subject": "feat(patterns): the multi-source research diamond bundle"
+    },
+    {
+      "revision": "758231490a2b6a6d7519daebcc2620ce540fbfaf",
+      "subject": "feat(patterns): add the pattern-bundle machine gate and put the runners in CI"
+    },
+    {
+      "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+      "subject": "feat(patterns): deliver Pattern 10, the ecosystem scan, in honest reduced form"
+    }
+  ],
+  "source_digests": [
+    {
+      "path": "examples/patterns/research-diamond/manifest.json",
+      "sha256": "0a8833db4af174c60c22f72db25ba66894438882aa3b1934806cf74d41bc2df4"
+    },
+    {
+      "path": "examples/patterns/ecosystem-scan/manifest.json",
+      "sha256": "d66e0303622a9acde382b115b428962f508c9c7510e26cbe8db3ebdbc21ee8b6"
+    }
+  ],
+  "environment": {
+    "cwd": "/home/nick/work/GraphEngineering",
+    "os": "Linux 7.0.0-28-generic x86_64",
+    "node": "v22.23.1",
+    "pnpm": "10.13.1",
+    "python": "3.14.4",
+    "uv": "0.11.11"
+  },
+  "clean_worktree_revalidation": {
+    "worktree_kind": "detached temporary worktree",
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "setup": [
+      {
+        "argv": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["corepack", "pnpm", "build"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["uv", "sync", "--project", "python", "--extra", "dev", "--locked"],
+        "result": "passed",
+        "exit_code": 0
+      }
+    ],
+    "checks": [
+      {
+        "argv": ["node", "scripts/check-pattern-bundles.mjs"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "both bundles validate against spec/pattern-bundle.schema.json with manifest claims cross-checked against the filesystem in both directions; each reports two honest-gap notes (adapters.realProvider null, tests.packedInstall null) which the gate reports and does not fail"
+      },
+      {
+        "argv": ["node", "scripts/check-pattern-runners.mjs"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "all 8 runner subprocesses exit 0: research-diamond and ecosystem-scan, each mockEndToEnd.typescript/python and injectedFailureAndResume.typescript/python"
+      },
+      {
+        "argv": ["corepack", "pnpm", "--filter", "@graph-engineering/patterns", "test"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "124 tests, 124 pass, 0 fail (node --test TAP output; includes research-diamond and ecosystem-scan fixture-agreement suites)"
+      },
+      {
+        "argv": ["uv", "run", "--project", "python", "pytest", "-q", "python/tests/test_patterns_ecosystem_scan.py"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "16 passed"
+      }
+    ],
+    "result": "passed",
+    "summary": "Both pattern bundles, their machine gate, their constructors' four-way canonical graph hashes (research-diamond f266955aef97a44b8635271fa3c20ab2790abaa7a4815a08810d784c08eb2eef, ecosystem-scan 105772b922af64758407ad71f4e47cb35964609728861ec0bf8baed343388303 identical from TS constructor, Python constructor, committed JSON and committed YAML) and all 8 runners are green at the committed candidate."
+  },
+  "requirements": [
+    {
+      "task_id": "PATTERN-01-RESEARCH",
+      "requirement": "mock e2e",
+      "result": "passed",
+      "reference": "run.mjs and run.py exit 0 under scripts/check-pattern-runners.mjs; deterministic mock adapter with committed fixtures and shared expected-events.json"
+    },
+    {
+      "task_id": "PATTERN-01-RESEARCH",
+      "requirement": "failure/resume",
+      "result": "passed",
+      "reference": "resume.mjs and resume.py exit 0: injected failure costs a real retry, crash after a committed step resumes without re-invoking it, terminal replay dispatches zero executors"
+    },
+    {
+      "task_id": "PATTERN-01-RESEARCH",
+      "requirement": "TS/Python/YAML/JSON",
+      "result": "passed",
+      "reference": "canonical graph hash f266955aef97a44b8635271fa3c20ab2790abaa7a4815a08810d784c08eb2eef identical from the TypeScript constructor, the Python constructor, the committed JSON and the committed YAML; recomputed by the bundle gate with both digests printed on mismatch"
+    },
+    {
+      "task_id": "PATTERN-01-RESEARCH",
+      "requirement": "budgets permissions and launch guides",
+      "result": "not-satisfied",
+      "reference": "launch guides exist (docs/patterns/research-diamond.md: shell, CLI, TS/Python SDK, Claude Code, Codex, MCP, real-provider setup, operational runbook), but the manifest declares policy.budget.enforcement none and policy.permissions.enforcement none: budgets and permissions are documentation, not enforced behaviour (blocked on D10-BUDGET-CONFORMANCE-038, status planned)"
+    },
+    {
+      "task_id": "PATTERN-01-RESEARCH",
+      "requirement": "PB manifest includes deterministic fixtures expected events opt-in provider setup architecture diagram and Claude Code Codex MCP and shell guides",
+      "result": "passed",
+      "reference": "manifest sections fixtures (sources.json, expected-events.json, expected-run.json), adapters.deterministicMock + realProvider null with a real-provider-setup guide, diagrams (topology/sequence/recovery/dataFlow/authority), and docs.launchGuides covering Claude Code, Codex, MCP and shell; validated by scripts/check-pattern-bundles.mjs exit 0"
+    },
+    {
+      "task_id": "PATTERN-10-ECOSYSTEM",
+      "requirement": "parallel sources",
+      "result": "passed",
+      "reference": "three mock-adapter fetch lanes joined at a barrier, with a promise-gate/asyncio.Barrier overlap proof (no sleeps, no clocks) in both runners; both runners exit 0 under the gate"
+    },
+    {
+      "task_id": "PATTERN-10-ECOSYSTEM",
+      "requirement": "cross-set dedupe/rank",
+      "result": "passed",
+      "reference": "fixture-borne semantic cases: one item duplicated across sources folded with both sightings kept, one version conflict resolved highest-version-wins and reported, one out-of-window advisory dropped with its reason; global ranking in the digest node compared against shared expected fixtures; note the manifest's noImpactClassification limitation: ranking is by fixture publication date with itemId tie-break"
+    },
+    {
+      "task_id": "PATTERN-10-ECOSYSTEM",
+      "requirement": "schedule-safe replay",
+      "result": "not-satisfied",
+      "reference": "the manifest's own limitations declare noSchedule ('no scheduler, no schedule identity and no scheduled-run provenance; every run here is started by hand') and noOverlapLease ('nothing fences two concurrent runs'); what is proven is terminal replay with zero executor dispatches within one hand-started run, which is not schedule-safety"
+    },
+    {
+      "task_id": "PATTERN-10-ECOSYSTEM",
+      "requirement": "provider and cost budgets",
+      "result": "not-satisfied",
+      "reference": "manifest declares policy.budget.enforcement none ('no rate limiting and no cost bound beyond the scheduler's attempt policies') and no real provider exists; the retry budgets exercised in resume runners are attempt policies, not provider or cost budgets"
+    },
+    {
+      "task_id": "PATTERN-10-ECOSYSTEM",
+      "requirement": "PB manifest includes YAML JSON TypeScript Python deterministic fixtures expected events budgets permissions opt-in provider setup diagram and all launch guides",
+      "result": "passed",
+      "reference": "all listed manifest sections exist and validate under scripts/check-pattern-bundles.mjs (graphs json+yaml with canonical hash 105772b922af64758407ad71f4e47cb35964609728861ec0bf8baed343388303, both constructors, fixtures with expected events, budgets and permissions sections carrying honest enforcement:none declarations, realProvider null with setup guide, diagrams, docs/patterns/ecosystem-scan.md launch guides); the budgets/permissions sections are present as documentation, their enforcement gap is scored under the previous requirement"
+    }
+  ],
+  "exclusions": [
+    "The registered expected artifacts patterns/multi-source-research(/manifest.json) and patterns/ecosystem-scan(/manifest.json) do not exist; the bundles landed at examples/patterns/research-diamond and examples/patterns/ecosystem-scan. Closure requires either a registry contract amendment to the real paths or a relocation.",
+    "Both bundles declare maturity alpha and noIndependentReview: no independent review of either bundle exists.",
+    "Registry dependencies are open: PATTERN-01-RESEARCH depends on D14-PATTERN-SKELETONS-053 (planned), D6-ROUTER-BARRIER-023 (in_progress), D9-DURABLE-EXT-CONFORMANCE-034 (planned) and D10-BUDGET-CONFORMANCE-038 (planned); PATTERN-10-ECOSYSTEM additionally on D7-CYCLE-CONFORMANCE-027 (in_progress), D13-ADAPTERS-049 (planned) and D15-STORAGE-WORKERS-054 (planned). scripts/check-task-graph.mjs fails any completed task over a non-completed predecessor, so the registry model does not permit completing either pattern task with these dependencies open, independent of the artifact evidence above.",
+    "The ecosystem-scan barrier is the static {\"condition\":\"all\"} join, not an integrated barrier policy; partial-source-failure retention is blocked on the barrier lane in both bundles."
+  ]
+}

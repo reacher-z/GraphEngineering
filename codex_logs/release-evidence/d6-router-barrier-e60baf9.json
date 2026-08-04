@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "task-source-candidate",
+  "recorded_at": "2026-08-04T19:14:00Z",
+  "tasks": [
+    "D6-ROUTER-BARRIER-023"
+  ],
+  "candidate": {
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "base_revision": "d242b65e6f5b8e77ab2ed5c4d09ea518d4af0d52",
+    "branch_at_recording": "feat/authoring-foundation"
+  },
+  "landing_commits": [
+    {
+      "revision": "b34aea16701952967654e407e47d084e514623fa",
+      "subject": "spec: make barrier policy ownership a versioned claim (contract revision 2)"
+    },
+    {
+      "revision": "63302046111239662d9386b1adb540ab45788f7a",
+      "subject": "feat(core): refuse a claimed barrier policy instead of passing it silently (TS tranche 1)"
+    },
+    {
+      "revision": "a96f7073c89f6c09d12054a81b55ca85c67b2795",
+      "subject": "feat(python): refuse a claimed barrier policy instead of passing it silently (Python tranche 1)"
+    },
+    {
+      "revision": "cddd2031d1e8d37349cbbaf13a39250580cbc0f6",
+      "subject": "fix(python): restore the quorum accepts diagnostic path"
+    },
+    {
+      "revision": "0bc9307fd92dcbd4d928848320bdb4b545f86c1e",
+      "subject": "conformance: join the two barrier compilers (tranche 1 join)"
+    },
+    {
+      "revision": "93ef3e77c9dd076d4a5bda8aaf82b03aa5560d87",
+      "subject": "feat(runtime): execute integrated barriers (TS tranche 2 execution; core 378 to 465, runtime 275 to 318)"
+    },
+    {
+      "revision": "5e0dbe5dc453976d3bf8a99f5d2c530f80dcb385",
+      "subject": "commit that landed python/src/graph_engineering/integrated_barrier_runtime.py (+1310 lines) and python/tests/test_integrated_barrier_runtime.py (+1190 lines); primary subject is the Python redaction hard-cut"
+    },
+    {
+      "revision": "4b9fc7dc7b99de01d35770286dafafb8f945fb65",
+      "subject": "commit that extended tools/conformance/run.mjs with the barrier tranche-2 evaluation/identity/replay/identifier join; primary subject is the adapter join"
+    }
+  ],
+  "source_digests": [
+    {
+      "path": "spec/conformance/integrated-barrier.case.json",
+      "sha256": "a945d69d9f4fe8fff5e730b84549b28cb8c4684cfb97a2e538fb611868cc21fe"
+    },
+    {
+      "path": "spec/integrated-barrier-semantics.md",
+      "sha256": "aebdddf71a9ee637d05d3c25aec519ed8f2170f3d5f8a3e4ee664075a5f097aa"
+    }
+  ],
+  "environment": {
+    "cwd": "/home/nick/work/GraphEngineering",
+    "os": "Linux 7.0.0-28-generic x86_64",
+    "node": "v22.23.1",
+    "pnpm": "10.13.1",
+    "python": "3.14.4",
+    "uv": "0.11.11"
+  },
+  "clean_worktree_revalidation": {
+    "worktree_kind": "detached temporary worktree",
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "note": "The primary checkout holds an untracked python/tests/test_integrated_barrier_scheduler.py plus uncommitted edits to both Python barrier test files, i.e. the Python scheduler-integration tranche is mid-flight and uncommitted. Nothing below evidences that uncommitted work.",
+    "setup": [
+      {
+        "argv": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["corepack", "pnpm", "build"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["uv", "sync", "--project", "python", "--extra", "dev", "--locked"],
+        "result": "passed",
+        "exit_code": 0
+      }
+    ],
+    "checks": [
+      {
+        "argv": ["corepack", "pnpm", "test"],
+        "result": "failed",
+        "exit_code": 1,
+        "summary": "barrier-relevant packages green: core 465/465 (includes the integrated-barrier and integrated-router compiler passes), runtime 341/341 across 16 files including integrated-barrier-capability, integrated-barrier-replay, integrated-barrier-runtime and integrated-router-conformance; the exit 1 came only from 2 unrelated packages/sqlite failures (2 failed | 1556 passed | 4 skipped)"
+      },
+      {
+        "argv": ["uv", "run", "--project", "python", "pytest", "-q", "python/tests/test_integrated_barrier_compiler.py", "python/tests/test_integrated_barrier_runtime.py"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "452 passed (committed compiler and evaluation/replay halves; the uncommitted scheduler-integration test file in the primary checkout is not part of this run)"
+      },
+      {
+        "argv": ["node", "tools/conformance/run.mjs"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "Cross-language integrated-barrier conformance passed for 79 policy cases (16 normalized policy snapshots), 15 ownership cases through both the native validator and the real compiler pass, and 16 compiler cases through compileGraph/try_compile_graph carrying 16 literal graph hashes and 21 ordered diagnostics (5 multi-diagnostic order witnesses, 1 router-before-barrier witness, 3 suppression-chain witnesses, all 4 categories); tranche 2 joined 41 evaluation cases through evaluateIntegratedBarrier/evaluate_integrated_barrier (all 11 reason codes, all 4 resolutions, 17 quorum censuses carrying 55 vote records), 12 identity cases with policyHash and decisionId recomputed natively on both sides (8 barrier, 4 route, 1 naive-concatenation framing witness), 8 replay cases (4 zero-rejudge adoptions, all 3 rejection codes, 0 executor calls on both sides and 0 through the real scheduler), and 12 identifier cases (4 accepted, 8 rejected); claims {\"implementationClaim\":false,\"typescriptRuntimeClaim\":false,\"pythonRuntimeClaim\":false,\"capabilityGateClaim\":false}"
+      }
+    ],
+    "result": "passed-with-notes",
+    "summary": "Tranche 1 (both compilers refuse a claimed policy, joined) and the tranche-2 evaluation/identity/replay/identifier join are green at the committed candidate. The TS runtime executes integrated barriers and refuses them under the durable capability gate; the Python scheduler integration is uncommitted and the corpus capability claims are all still literally false."
+  },
+  "requirements": [
+    {
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "requirement": "conditional edge execution",
+      "result": "passed",
+      "reference": "already recorded in the registry (plan section 31.35.12); reconfirmed here by runtime 341/341 including integrated-router-conformance.test.ts"
+    },
+    {
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "requirement": "deadline/quorum/missing statistics",
+      "result": "passed",
+      "reference": "tranche-2 join: 41 evaluation cases covering all 11 reason codes and all 4 resolutions with 17 quorum censuses carrying 55 vote records; TS execution commit 93ef3e7 settles deadlines against an injected monotonic clock; Python evaluation half is the committed integrated_barrier_runtime.py, not yet scheduler-integrated"
+    },
+    {
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "requirement": "confidence escalation",
+      "result": "not-satisfied",
+      "reference": "the only joined confidence artifact is a confidenceBasisPoints: null nullable-member witness in an identity case; no runtime confidence-escalation behaviour is joined or evidenced, matching the coverage matrix's open item 'confidence escalation evidence at runtime'"
+    },
+    {
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "requirement": "route decision event emission",
+      "result": "not-satisfied",
+      "reference": "4 route documents appear in the joined identity cases (policyHash/decisionId recomputed natively), but durable RouteSelected emission through the real scheduler is not evidenced; the coverage matrix lists 'dedicated durable RouteSelected identity and zero-rejudge replay' as Open"
+    },
+    {
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "requirement": "all minimum percentage quorum and deadline barrier settlement parity with complete success failure and missing statistics",
+      "result": "passed",
+      "reference": "tranche-2 join: 41 evaluation cases through evaluateIntegratedBarrier/evaluate_integrated_barrier over all four barrier kinds with exact-integer satisfaction arithmetic, member-for-member on both sides, 0 divergences"
+    },
+    {
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "requirement": "incomplete single and multicast routers without exhaustive cases or default reject before execution",
+      "result": "passed",
+      "reference": "already recorded in the registry from tranche 1 (compiler GE1401-GE1407, pattern lowering, pre-dispatch capability gate); reconfirmed by the 16 joined compiler cases with 21 ordered diagnostics"
+    },
+    {
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "requirement": "unsatisfied barriers never bind an output under every onUnsatisfied resolution",
+      "result": "passed",
+      "reference": "TS: integrated-barrier-runtime.test.ts (planted mutant 'an unsatisfied barrier binding an output' killed per commit 93ef3e7); joined evaluation cases exercise all 4 resolutions; Python enforces the property by construction in integrated_barrier_runtime.py but only at the evaluation layer, not yet from the scheduler"
+    },
+    {
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "requirement": "zero-rejudge decision replay with zero executor calls plus policy-drift identity-mismatch and duplicate-decision rejection",
+      "result": "passed",
+      "reference": "tranche-2 join: 8 replay cases with 4 zero-rejudge adoptions, all 3 rejection codes, 0 executor calls on both sides and 0 through the real scheduler"
+    }
+  ],
+  "exclusions": [
+    "spec/conformance/integrated-barrier.case.json at the candidate declares implementationClaim, typescriptRuntimeClaim, pythonRuntimeClaim and capabilityGateClaim all literally false, and its claimsNote requires a deliberate reviewed edit by the implementing lane to flip any of them. The joined conformance run asserts these flags are still false.",
+    "The Python scheduler integration of barriers is uncommitted work in the primary checkout (untracked python/tests/test_integrated_barrier_scheduler.py); the committed Python half is evaluation/replay only.",
+    "No independent tranche-2 review exists; the latest D6 reviews in codex_logs/reviews are dated 2026-07-28 and cover tranche 1. The registry's own next_action states no capability flag may move until tranche 2 lands with its own join and independent review; the join now exists, the review does not.",
+    "This task is honestly in_progress and this file proposes no status change; it exists so the integrator can add test_evidence rows for the requirements the tranche-2 join now covers."
+  ]
+}

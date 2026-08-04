@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "cross-language-join-record",
+  "task_id": "D13-ADAPTERS-049",
+  "recorded_at": "2026-08-04T19:05:00Z",
+  "candidate": {
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744"
+  },
+  "corpus": {
+    "path": "spec/conformance/adapter.case.json",
+    "sha256": "28c8f14e3d2fddf1e48e5839ac5bcfa5941cb9a4d39291bc7a342cf3af4d7817",
+    "implementationClaim": false,
+    "contractStatus": "contract-only-native-implementation-required"
+  },
+  "join": {
+    "argv": ["node", "tools/conformance/run.mjs"],
+    "cwd": "detached temporary worktree of e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "exit_code": 0,
+    "claim_line": "Cross-language adapter conformance passed for 165 declared cases (35 descriptor, 31 preflight, 21 stream, 21 usage, 8 tool, 29 error, 13 retry, 7 circuit) compared code, rule identifier and projection member for member, 131/131 of 131 registered rules exercised with 0 unregistered on either side, the 14-code / 11-denial-reason / 5-finish-reason / 9-meter / 8-kind / 16-capability closed vocabularies, the recomputed taxonomy (4 retryable, 5 pre-dispatch) and the 9-row in-doubt matrix, and 14/14 codes injectable through both real mock adapters; 0 disclosed divergences and 0 observed across every joined member, including the GE_ADAPTER_POLICY_DENIED envelope both MockOutcome types now carry a denial reason for; implementationClaim false."
+  },
+  "halves": {
+    "typescript": "computed only from @graph-engineering/adapters (packages/adapters); package suite 307 tests passed across 7 files",
+    "python": "computed by tools/conformance/python_adapter_report.py from python/src/graph_engineering/adapters"
+  },
+  "landing_commits": [
+    "19e52c493fb3eef2325614293d5407edec8c98da",
+    "173cbf97335828272da4706de50ca976699a4bfd",
+    "15d5a216ce684a57d9e252f90dd805d9a626caa7",
+    "4b9fc7dc7b99de01d35770286dafafb8f945fb65"
+  ],
+  "non_claims": [
+    "Deterministic-mock evidence only: no network access, no credential, no clock.",
+    "No live vendor adapter exists; live-provider evidence is opt-in, quarantined and separately gated.",
+    "No MCP client transport exists; only the MCP capability-denial paths are implemented.",
+    "No fallback chain exists in either implementation; fallback parity is therefore unevidenced.",
+    "This record does not flip the corpus implementationClaim; only the implementing lane may do that in a reviewed edit."
+  ],
+  "companion_evidence": "codex_logs/release-evidence/d13-adapters-e60baf9.json"
+}

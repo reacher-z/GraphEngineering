@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "kind": "registry-patch-proposal",
+  "recorded_at": "2026-08-04T19:40:00Z",
+  "candidate_revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+  "prepared_by": "evidence-closure lane (read-only assessment; registry untouched)",
+  "headline": "None of the ten assessed tasks is closable to completed at candidate e60baf9. Every verdict below is grounded in commands run in a detached clean worktree of that commit (see the per-cluster evidence files) because the primary checkout carried uncommitted mid-flight edits from the redaction and barrier lanes. Two structural facts block most closures independently of test results: (1) scripts/check-task-graph.mjs fails 'completed-dependency-open' for any completed task with a non-completed predecessor, and every assessed task has at least one open predecessor; (2) several registered expected_artifacts paths name locations the work did not land at, and the evidence-closure artifact rule matches the exact registered path or files strictly below it.",
+  "proposals": [
+    {
+      "taskId": "D9-TS-REDACTION-087",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/d9-redaction-e60baf9.json",
+      "justification": "Partial - not closable. Sink-before-write redaction genuinely landed in TypeScript (commits f55efeb2e9d13dfde3c7d8b9e9bbd7bc04e50109, 75c05061f2975c09c2817e7e07980f7453b5a206, 69ab0a20c7c124b43f22a73f00a000daa573c6bc): persistence 79/79 and runtime 341/341 in a clean worktree, and the cross-language redaction join passed (exit 0). Three of four expected_tests are evidenced; 'every TypeScript sink is canary-free' is not.",
+      "caveats": [
+        "Registered expected_artifacts do not exist as registered: packages/persistence/src/redaction.ts is actually the directory packages/persistence/src/redaction/, and packages/runtime/test/redaction.test.ts does not exist (tests live in packages/persistence/test/redaction-*.test.ts and packages/runtime/test/durable-protection.test.ts).",
+        "The join's canary scan covers only the guarded journal surface (2 files, 2021 bytes, 0 detections vs 3/3 positive controls), not every sink; scripts/check-secret-canaries.mjs does not exist.",
+        "spec/conformance/redaction.case.json still declares implementationClaim false; only the implementing lane may flip it.",
+        "Dependency D9-REDACTION-039 is in_progress; check-task-graph.mjs forbids completing over it.",
+        "The redaction lane is actively editing these files uncommitted in the working tree right now; any status move should wait for that landing.",
+        "Status left at the current registry value ('planned'), which itself understates reality; the integrator may prefer in_progress with started_at, which the evidence file supports."
+      ]
+    },
+    {
+      "taskId": "D9-PY-REDACTION-088",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/d9-redaction-e60baf9.json",
+      "justification": "Partial - not closable. Mirror of 087: Python hard-cut landed (16118bfe817044af65dbd7293d611372a2161f39, 5e0dbe5dc453976d3bf8a99f5d2c530f80dcb385, 69ab0a20c7c124b43f22a73f00a000daa573c6bc); 198 targeted redaction/protection tests passed; join green. Three of four expected_tests evidenced; 'every Python sink is canary-free' is not (Python half of the scan: 2 files, 2027 bytes).",
+      "caveats": [
+        "Registered expected_artifacts do not exist as registered: python/src/graph_engineering/redaction.py is actually the directory python/src/graph_engineering/redaction/, and python/tests/test_redaction.py does not exist (actual: test_redaction_corpus.py, test_redaction_guard.py, test_redaction_pointer.py).",
+        "Same open dependency (D9-REDACTION-039 in_progress), same unflipped implementationClaim, same mid-flight lane activity as 087."
+      ]
+    },
+    {
+      "taskId": "D9-REDACTION-CONFORMANCE-089",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/d9-redaction-e60baf9.json",
+      "justification": "Not closable. The cross-language redaction join exists and passed (21 pointer, 34 wire, 39 flow cases, 3078-pair Cartesian domain, matching outcome digest 8bf04e64d1b07d55), which evidences 'identical flag migration identity and errors' only. The other three expected_tests are unmet.",
+      "caveats": [
+        "Missing registered artifact scripts/check-secret-canaries.mjs (the whole-sink canary scanner); the existing scan covers guarded journal bytes only.",
+        "Missing registered artifact codex_logs/release-evidence/redaction/manifest.json; deliberately NOT fabricated by this lane because the whole-sink scan it would attest does not exist.",
+        "'independent security disposition is signed' is unmet: the only redaction reviews (codex_logs/reviews/D9-Redaction-Contract-*-2026-07-26.md) predate the implementation and cover the contract, not the sink-byte join.",
+        "Dependencies D9-TS-REDACTION-087 and D9-PY-REDACTION-088 are not completed."
+      ]
+    },
+    {
+      "taskId": "D13-TS-ADAPTERS-081",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/d13-adapters-e60baf9.json",
+      "justification": "Partial - not closable as registered, though closest to done. All three registered artifacts exist; 307/307 package tests in a clean worktree; the 165-case cross-language join passed with 131/131 registered rules and 0 divergences (commit 173cbf97335828272da4706de50ca976699a4bfd, joined in 4b9fc7dc7b99de01d35770286dafafb8f945fb65). Three of four expected_tests fully evidenced.",
+      "caveats": [
+        "'rate circuit fallback cancellation and redaction': rate/retry, circuit, cancellation and redaction are all evidenced, but no fallback surface exists by documented design ('no network fallback'); either the registry contract's word 'fallback' must be amended to match the spec's no-fallback stance or a fallback surface must be built.",
+        "spec/conformance/adapter.case.json still declares implementationClaim false and the stale nonClaim 'No TypeScript or Python adapter exists'; the adapter lane must flip these in a reviewed edit before completion is honest.",
+        "Dependency D13-ADAPTER-SPEC-048 is status planned (its spec landed in 19e52c493fb3eef2325614293d5407edec8c98da but its registry entry never moved); check-task-graph.mjs blocks completing 081 over it. The 048 -> 081/082 -> 049 chain must move together.",
+        "No MCP client transport exists; only MCP capability-denial paths, which is what the registered test string asks for."
+      ]
+    },
+    {
+      "taskId": "D13-PY-ADAPTERS-082",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/d13-adapters-e60baf9.json",
+      "justification": "Partial - not closable as registered. Python adapters landed (15d5a216ce684a57d9e252f90dd805d9a626caa7); 359 targeted tests passed in a clean worktree; same join, 0 divergences. Three of four expected_tests fully evidenced; same fallback gap as 081.",
+      "caveats": [
+        "Registered expected artifact python/tests/adapters does not exist; the tests landed flat as python/tests/test_adapter_*.py (8 files). Registry contract amendment or a test move is required before the artifact requirement can bind.",
+        "Same open dependency (D13-ADAPTER-SPEC-048), unflipped corpus claim, and fallback gap as 081."
+      ]
+    },
+    {
+      "taskId": "D13-ADAPTERS-049",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/d13-adapters-e60baf9.json",
+      "justification": "Partial - not closable. The join itself is real and green: 165 declared cases, 131/131 rules exercised on both sides, 14/14 codes injectable through both real mock adapters, 0 divergences; normal CI runs it deterministically with no credentials. Four of five expected_tests evidenced; 'fallback cancellation and redaction parity' fails on the fallback member for the same reason as the lanes.",
+      "caveats": [
+        "The registered artifact codex_logs/release-evidence/adapters did not exist; this lane wrote codex_logs/release-evidence/adapters/manifest.json recording the join results, so the artifact path is now satisfiable.",
+        "No independent shared-fixture review of the adapter join exists (the registry's own next_action asks for one).",
+        "Dependencies D13-TS-ADAPTERS-081 and D13-PY-ADAPTERS-082 are not completed; the whole chain including D13-ADAPTER-SPEC-048 must close first or together."
+      ]
+    },
+    {
+      "taskId": "D9-OPS-CONTROL-085",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/d9-ops-control-e60baf9.json",
+      "justification": "Partial - not closable. Only a subset of the registered task landed (3fff8d68b47566f25f3ad345070579fa3671fbaf, e6d60d64aa2eaa7b10932bcacb36e38b1c7b1180): a read-only status/inspect/logs surface over both journal contracts with stable envelopes and exits, proven by 232/232 TS CLI tests, 82 Python CLI-operations tests, and the green 158-case cross-language join (39 shared journals, 138 read invocations, 134 append-free proofs, 18 fail-closed refusals, exit codes 0/2/4/5/6). Only 1 of 4 expected_tests ('stable JSON envelopes and exits') is satisfied.",
+      "caveats": [
+        "'status watch inspect and logs': watch does not exist in either CLI.",
+        "'pause resume cancel and retry': pause does not exist at all; resume/cancel/retry (plus replay/fork) are deliberate fail-closed refusals documented in docs/CLI.md 'Unimplemented durable operations', and the corpus claims all five durable operation claims literally false.",
+        "'race and stale-operation rejection': untestable, since no mutating operation exists.",
+        "Registered artifact python/src/graph_engineering/cli does not exist as a directory (actual: cli.py, cli_operations.py).",
+        "Dependencies D9-DURABLE-EXT-CONFORMANCE-034 and D8-RUNTIME-CHAOS-084 are both status planned, exactly as the task brief warned; check-task-graph.mjs blocks completion over them."
+      ]
+    },
+    {
+      "taskId": "D6-ROUTER-BARRIER-023",
+      "proposedStatus": "in_progress",
+      "evidenceFile": "codex_logs/release-evidence/d6-router-barrier-e60baf9.json",
+      "justification": "Partial - correctly in_progress (unchanged). Tranche 2 has advanced materially beyond the registry's recorded state: TS executes integrated barriers (93ef3e77c9dd076d4a5bda8aaf82b03aa5560d87), the Python evaluation/replay half is committed (landed inside 5e0dbe5dc453976d3bf8a99f5d2c530f80dcb385), and the tranche-2 cross-language join is green (41 evaluation cases, 12 identity, 8 replay with 0 executor calls including through the real scheduler, 12 identifier cases; joined via run.mjs as extended in 4b9fc7dc7b99de01d35770286dafafb8f945fb65). The evidence file supports adding passed test_evidence rows for: 'deadline/quorum/missing statistics', 'all minimum percentage quorum and deadline barrier settlement parity with complete success failure and missing statistics', 'unsatisfied barriers never bind an output under every onUnsatisfied resolution', and 'zero-rejudge decision replay with zero executor calls plus policy-drift identity-mismatch and duplicate-decision rejection'.",
+      "caveats": [
+        "Not closable: 'confidence escalation' and 'route decision event emission' remain unevidenced at runtime (only a confidenceBasisPoints:null witness and 4 route identity documents exist in the join).",
+        "The Python scheduler integration is uncommitted (untracked python/tests/test_integrated_barrier_scheduler.py plus dirty barrier test files in the primary checkout).",
+        "spec/conformance/integrated-barrier.case.json claims (implementationClaim, typescriptRuntimeClaim, pythonRuntimeClaim, capabilityGateClaim) are all still literally false and only the implementing lane may flip them.",
+        "No tranche-2 independent review exists (latest D6 reviews are 2026-07-28, tranche 1); the registry's own next_action requires one before any capability flag moves."
+      ]
+    },
+    {
+      "taskId": "PATTERN-01-RESEARCH",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/wp10-patterns-e60baf9.json",
+      "justification": "Partial - not closable. The bundle is real and green: machine gate exit 0, all 4 of its runners exit 0, 124/124 patterns package tests, four-way canonical graph hash f266955aef97a44b8635271fa3c20ab2790abaa7a4815a08810d784c08eb2eef (TS constructor, Python constructor, JSON, YAML), launch guides for shell/CLI/SDK/Claude Code/Codex/MCP (commit 1938d46b16ab2c35e5f82997f1890fbccff8631a, gate in 758231490a2b6a6d7519daebcc2620ce540fbfaf). Four of five expected_tests evidenced.",
+      "caveats": [
+        "Registered artifacts patterns/multi-source-research(/manifest.json) do not exist; the bundle lives at examples/patterns/research-diamond. Contract amendment or relocation required.",
+        "'budgets permissions and launch guides' is unmet in enforcement terms: the manifest itself declares budget and permissions enforcement 'none' (blocked on D10-BUDGET-CONFORMANCE-038, planned).",
+        "Open dependencies block completion under check-task-graph.mjs: D14-PATTERN-SKELETONS-053 (planned), D6-ROUTER-BARRIER-023 (in_progress), D9-DURABLE-EXT-CONFORMANCE-034 (planned), D10-BUDGET-CONFORMANCE-038 (planned). The registry model does not permit completing this task with those open, regardless of bundle quality.",
+        "The bundle declares noIndependentReview and maturity alpha."
+      ]
+    },
+    {
+      "taskId": "PATTERN-10-ECOSYSTEM",
+      "proposedStatus": "planned",
+      "evidenceFile": "codex_logs/release-evidence/wp10-patterns-e60baf9.json",
+      "justification": "Partial - not closable, and the bundle says so itself. Delivered 'in honest reduced form' at the candidate commit (e60baf9832b771e2bf297d96756797d8c83a18c1): machine gate and all 4 runners green, 16 Python constructor tests, four-way canonical hash 105772b922af64758407ad71f4e47cb35964609728861ec0bf8baed343388303, real dedupe/version-conflict/window fixtures. Three of five expected_tests evidenced.",
+      "caveats": [
+        "'schedule-safe replay' is unmet: the manifest declares noSchedule and noOverlapLease; every run is hand-started and nothing fences concurrent runs.",
+        "'provider and cost budgets' is unmet: budget enforcement none, no real provider exists.",
+        "The normalize barrier is a static all-success join, not an integrated barrier policy (blocked on the D6 lane).",
+        "Registered artifacts patterns/ecosystem-scan(/manifest.json) do not exist; the bundle lives at examples/patterns/ecosystem-scan.",
+        "Open dependencies (D14-PATTERN-SKELETONS-053, D7-CYCLE-CONFORMANCE-027, D9-DURABLE-EXT-CONFORMANCE-034, D10-BUDGET-CONFORMANCE-038, D13-ADAPTERS-049, D15-STORAGE-WORKERS-054) block completion under check-task-graph.mjs."
+      ]
+    }
+  ],
+  "environment_note": "All commands ran on the committed candidate in a detached temporary worktree. Two pre-existing reds at the candidate are outside all ten assessed tasks and are reported for honesty: packages/sqlite test/operation-baseline-reconcile.test.ts fails 2 of 232 tests (reproduced twice), making the workspace `corepack pnpm test` exit 1; and the full Python suite reports 5 failed, 4401 passed, 1 skipped, all 5 failures in python/tests/test_sqlite_cursor_publication_{clock_authority,initial_stage_adoption,session}.py."
+}

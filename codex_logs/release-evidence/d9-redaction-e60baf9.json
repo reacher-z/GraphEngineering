@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "task-source-candidate",
+  "recorded_at": "2026-08-04T19:10:00Z",
+  "tasks": [
+    "D9-TS-REDACTION-087",
+    "D9-PY-REDACTION-088",
+    "D9-REDACTION-CONFORMANCE-089"
+  ],
+  "candidate": {
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "base_revision": "d242b65e6f5b8e77ab2ed5c4d09ea518d4af0d52",
+    "branch_at_recording": "feat/authoring-foundation"
+  },
+  "landing_commits": [
+    {
+      "revision": "f55efeb2e9d13dfde3c7d8b9e9bbd7bc04e50109",
+      "subject": "feat(persistence): sink-before-write redaction guard"
+    },
+    {
+      "revision": "75c05061f2975c09c2817e7e07980f7453b5a206",
+      "subject": "feat(runtime): stop raw payloads reaching disk"
+    },
+    {
+      "revision": "16118bfe817044af65dbd7293d611372a2161f39",
+      "subject": "feat(python): sink-before-write redaction guard"
+    },
+    {
+      "revision": "5e0dbe5dc453976d3bf8a99f5d2c530f80dcb385",
+      "subject": "feat(python): stop raw payloads reaching disk (D9-PY-REDACTION-088 hard-cut)"
+    },
+    {
+      "revision": "69ab0a20c7c124b43f22a73f00a000daa573c6bc",
+      "subject": "fix: converge both runtimes on the frozen failure shape (current cross-language redaction join)"
+    }
+  ],
+  "source_digests": [
+    {
+      "path": "spec/conformance/redaction.case.json",
+      "sha256": "a5e77e36db6bb2b1e171157b6de8a38443a89c860b8b6e46bf0edd1694cb7cd0"
+    },
+    {
+      "path": "spec/redaction-semantics.md",
+      "sha256": "900293c56224db04f6b99a3bafa1d1d6cdea9e2b8a3ea5eec911353ae07c696a"
+    }
+  ],
+  "environment": {
+    "cwd": "/home/nick/work/GraphEngineering",
+    "os": "Linux 7.0.0-28-generic x86_64",
+    "node": "v22.23.1",
+    "pnpm": "10.13.1",
+    "python": "3.14.4",
+    "uv": "0.11.11"
+  },
+  "clean_worktree_revalidation": {
+    "worktree_kind": "detached temporary worktree",
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "note": "At recording time the primary checkout carried uncommitted redaction-lane edits (packages/persistence/src/redaction/*, packages/runtime/src/durable-protection.ts, python/src/graph_engineering/redaction/policy.py, spec/conformance/redaction.case.json, tools/conformance/run.mjs and more), i.e. the redaction lane was actively mid-flight. All commands below ran in a detached worktree of the committed candidate; nothing here evidences the uncommitted work.",
+    "setup": [
+      {
+        "argv": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["corepack", "pnpm", "build"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["uv", "sync", "--project", "python", "--extra", "dev", "--locked"],
+        "result": "passed",
+        "exit_code": 0
+      }
+    ],
+    "checks": [
+      {
+        "argv": ["corepack", "pnpm", "test"],
+        "result": "failed",
+        "exit_code": 1,
+        "summary": "All redaction-relevant packages green: persistence 79/79 (9 files, including redaction-durable-json, redaction-contract, redaction-transform, redaction-receipt), runtime 341/341 (16 files, including durable-protection), core 465/465, adapters 307/307, primitives 147/147. The workspace run failed only in packages/sqlite test/operation-baseline-reconcile.test.ts (2 failed | 1556 passed | 4 skipped), an unrelated lane; the 2 failures reproduce on a second isolated run of that file"
+      },
+      {
+        "argv": ["uv", "run", "--project", "python", "pytest", "-q", "python/tests/test_redaction_corpus.py", "python/tests/test_redaction_guard.py", "python/tests/test_redaction_pointer.py", "python/tests/test_durable_payload_protection.py"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "198 passed; the full-suite `uv run --project python pytest -q` reported 5 failed, 4401 passed, 1 skipped, 2 subtests passed, with all 5 failures in unrelated python/tests/test_sqlite_cursor_publication_* files"
+      },
+      {
+        "argv": ["node", "tools/conformance/run.mjs"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "Cross-language redaction conformance passed for 21 pointer cases (7 transforms, 14 rejections over 1 code), 34 wire cases over 13 schemas (17 valid, 17 rejected, 12 disposition/redacted pairs), 39 flow cases (18 authorized, 21 denied) over the complete 3078-pair Cartesian domain of 57 sources x 54 sinks (outcome digest 8bf04e64d1b07d55), 8 receipts bound by count/order/MAC, the 12-code vocabulary and the 4-row disposition truth table, and one seeded canary scanned over 2/2 files and 2021/2027 bytes with 0 detections against 3/3 positive-control detections; implementationClaim false"
+      }
+    ],
+    "result": "passed-with-notes",
+    "summary": "Sink-before-write redaction is landed and green in both languages at the committed candidate, and the cross-language redaction join passes. The workspace TS run is red only in the unrelated sqlite lane."
+  },
+  "requirements": [
+    {
+      "task_id": "D9-TS-REDACTION-087",
+      "requirement": "wire flag matches protected representation",
+      "result": "passed",
+      "reference": "34 wire cases over 13 schemas with 12 disposition/redacted pairs in the redaction join; packages/persistence redaction test files and packages/runtime/test/durable-protection.test.ts refuse an inline disposition or redacted:true in a protected journal"
+    },
+    {
+      "task_id": "D9-TS-REDACTION-087",
+      "requirement": "every TypeScript sink is canary-free",
+      "result": "not-satisfied",
+      "reference": "the join's seeded canary scan covers 2 files and 2021 bytes (the guarded durable journal surface) with 0 detections against 3 positive-control detections; that is not a scan of every sink (journal, checkpoint, artifact, stdout, stderr, log, trace, error, support bytes), and the registered whole-sink scanner scripts/check-secret-canaries.mjs does not exist at the candidate"
+    },
+    {
+      "task_id": "D9-TS-REDACTION-087",
+      "requirement": "replay identity is preserved",
+      "result": "passed",
+      "reference": "packages/runtime/test/durable-protection.test.ts 'refuses to resume a durable run with <mismatch>' cases; 8 corpus receipts bound by count/order/MAC in the join; v1alpha2 records carry payloadHash and capturePolicyHash which the CLI and scheduler validate on read"
+    },
+    {
+      "task_id": "D9-TS-REDACTION-087",
+      "requirement": "legacy false-flag history follows migration policy",
+      "result": "passed",
+      "reference": "packages/runtime/test/durable-protection.test.ts legacy v1alpha1 suite: reads and reports a misleading legacy history without repairing it, refuses to resume a legacy history and appends nothing, refuses to start over a legacy run id; corpus legacyCases/legacyMatrix joined cross-language"
+    },
+    {
+      "task_id": "D9-PY-REDACTION-088",
+      "requirement": "wire flag matches protected representation",
+      "result": "passed",
+      "reference": "same 34 joined wire cases computed natively by tools/conformance/python_redaction_report.py; python/tests/test_durable_payload_protection.py rejects records whose data carries input, output, result or a bare hash"
+    },
+    {
+      "task_id": "D9-PY-REDACTION-088",
+      "requirement": "every Python sink is canary-free",
+      "result": "not-satisfied",
+      "reference": "the Python half of the join canary scan covers 2 files and 2027 bytes with 0 detections against 3 positive-control detections; the same whole-sink gap as the TypeScript lane applies"
+    },
+    {
+      "task_id": "D9-PY-REDACTION-088",
+      "requirement": "replay identity is preserved",
+      "result": "passed",
+      "reference": "python/tests/test_durable_payload_protection.py 'a different capture policy cannot resume the run'; same joined receipt/MAC binding"
+    },
+    {
+      "task_id": "D9-PY-REDACTION-088",
+      "requirement": "legacy false-flag history follows migration policy",
+      "result": "passed",
+      "reference": "python/tests/test_durable_payload_protection.py: a legacy v1alpha1 history is refused and never rewritten, a misleading legacy history reports the mismatch, an unconfigured run does not fall back to the legacy writer"
+    },
+    {
+      "task_id": "D9-REDACTION-CONFORMANCE-089",
+      "requirement": "identical flag migration identity and errors",
+      "result": "passed",
+      "reference": "the joined 21 pointer + 34 wire + 39 flow cases, the complete 3078-pair source-by-sink Cartesian domain with matching outcome digest 8bf04e64d1b07d55 on both sides, the 12-code vocabulary and 4-row disposition truth table"
+    },
+    {
+      "task_id": "D9-REDACTION-CONFORMANCE-089",
+      "requirement": "journal checkpoint artifact stdout stderr log trace error and support bytes contain no canary",
+      "result": "not-satisfied",
+      "reference": "only the guarded journal bytes are canary-scanned today (2 files / ~2 KB per language); checkpoint, artifact, stdout, stderr, log, trace, error and support sinks are not scanned, and scripts/check-secret-canaries.mjs does not exist"
+    },
+    {
+      "task_id": "D9-REDACTION-CONFORMANCE-089",
+      "requirement": "negative fixtures detect every seeded leak",
+      "result": "not-satisfied",
+      "reference": "the positive control detects 3/3 seeded canaries in the scanned journal surface, which proves the scanner is falsifiable there; 'every seeded leak' across the full sink inventory is not demonstrated because the full-sink scan does not exist"
+    },
+    {
+      "task_id": "D9-REDACTION-CONFORMANCE-089",
+      "requirement": "independent security disposition is signed",
+      "result": "not-satisfied",
+      "reference": "codex_logs/reviews/ contains only the four D9-Redaction-Contract-* reviews of 2026-07-26, which reviewed the redaction contract before implementation; no independent security review of the implemented sink-byte join exists"
+    }
+  ],
+  "exclusions": [
+    "spec/conformance/redaction.case.json at the candidate declares implementationClaim false and contractStatus contract-only-native-implementation-required; the implementing lanes have not flipped the claim, and the working tree shows that lane still actively editing the corpus and guards.",
+    "The registered expected artifacts of D9-TS-REDACTION-087 (packages/persistence/src/redaction.ts, packages/runtime/test/redaction.test.ts) and D9-PY-REDACTION-088 (python/src/graph_engineering/redaction.py, python/tests/test_redaction.py) do not exist as registered: the implementations landed as directories/differently named files (packages/persistence/src/redaction/, packages/persistence/test/redaction-*.test.ts, python/src/graph_engineering/redaction/, python/tests/test_redaction_{corpus,guard,pointer}.py). Closure requires a registry contract amendment or file moves.",
+    "The registered expected artifacts of D9-REDACTION-CONFORMANCE-089 scripts/check-secret-canaries.mjs and codex_logs/release-evidence/redaction/manifest.json do not exist. This evidence run deliberately does not create the redaction manifest, because writing a closure manifest for a join whose whole-sink canary scan does not exist would fabricate closure.",
+    "D9-REDACTION-039, the dependency of both native lanes, is status in_progress; scripts/check-task-graph.mjs forbids completing a task over a non-completed predecessor."
+  ]
+}

@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "task-source-candidate",
+  "recorded_at": "2026-08-04T19:05:00Z",
+  "tasks": [
+    "D13-TS-ADAPTERS-081",
+    "D13-PY-ADAPTERS-082",
+    "D13-ADAPTERS-049"
+  ],
+  "candidate": {
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "base_revision": "d242b65e6f5b8e77ab2ed5c4d09ea518d4af0d52",
+    "branch_at_recording": "feat/authoring-foundation"
+  },
+  "landing_commits": [
+    {
+      "revision": "19e52c493fb3eef2325614293d5407edec8c98da",
+      "subject": "spec: freeze the provider and tool adapter contract"
+    },
+    {
+      "revision": "173cbf97335828272da4706de50ca976699a4bfd",
+      "subject": "feat(adapters): deterministic mock and HTTP adapters, shell refuses"
+    },
+    {
+      "revision": "15d5a216ce684a57d9e252f90dd805d9a626caa7",
+      "subject": "feat(python): native provider and tool adapters"
+    },
+    {
+      "revision": "4b9fc7dc7b99de01d35770286dafafb8f945fb65",
+      "subject": "conformance: join the two adapter implementations"
+    }
+  ],
+  "source_digests": [
+    {
+      "path": "spec/conformance/adapter.case.json",
+      "sha256": "28c8f14e3d2fddf1e48e5839ac5bcfa5941cb9a4d39291bc7a342cf3af4d7817"
+    }
+  ],
+  "environment": {
+    "cwd": "/home/nick/work/GraphEngineering",
+    "os": "Linux 7.0.0-28-generic x86_64",
+    "node": "v22.23.1",
+    "pnpm": "10.13.1",
+    "python": "3.14.4",
+    "uv": "0.11.11"
+  },
+  "clean_worktree_revalidation": {
+    "worktree_kind": "detached temporary worktree",
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "note": "The primary checkout carried uncommitted mid-flight edits from another lane (redaction, cycle, integrated-barrier scheduler files), so every command below ran in a detached worktree of the committed candidate only.",
+    "setup": [
+      {
+        "argv": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["corepack", "pnpm", "build"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["uv", "sync", "--project", "python", "--extra", "dev", "--locked"],
+        "result": "passed",
+        "exit_code": 0
+      }
+    ],
+    "checks": [
+      {
+        "argv": ["corepack", "pnpm", "--filter", "@graph-engineering/adapters", "test"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "307 tests passed across 7 files (contract-corpus, dispatch-loop, http-adapter, mock-adapter, no-host-io, schema-conformance, shell-adapter); observed inside the full-workspace `corepack pnpm test` run, whose adapters segment reported 'Test Files 7 passed (7); Tests 307 passed (307)'"
+      },
+      {
+        "argv": ["uv", "run", "--project", "python", "pytest", "-q", "python/tests/test_adapter_corpus.py", "python/tests/test_adapter_dispatch_loop.py", "python/tests/test_adapter_http.py", "python/tests/test_adapter_mock.py", "python/tests/test_adapter_no_host_io.py", "python/tests/test_adapter_schema_conformance.py", "python/tests/test_adapter_shell.py"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "359 passed; the full-suite `uv run --project python pytest -q` reported 5 failed, 4401 passed, 1 skipped, 2 subtests passed, with all 5 failures in unrelated python/tests/test_sqlite_cursor_publication_* files"
+      },
+      {
+        "argv": ["node", "tools/conformance/run.mjs"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "Cross-language adapter conformance passed for 165 declared cases (35 descriptor, 31 preflight, 21 stream, 21 usage, 8 tool, 29 error, 13 retry, 7 circuit) compared code, rule identifier and projection member for member, 131/131 of 131 registered rules exercised with 0 unregistered on either side, the 14-code / 11-denial-reason / 5-finish-reason / 9-meter / 8-kind / 16-capability closed vocabularies, the recomputed taxonomy (4 retryable, 5 pre-dispatch) and the 9-row in-doubt matrix, and 14/14 codes injectable through both real mock adapters; 0 disclosed divergences and 0 observed across every joined member; implementationClaim false"
+      }
+    ],
+    "result": "passed-with-notes",
+    "summary": "Both native adapter lanes and the cross-language join are green on the committed candidate. The full-workspace `corepack pnpm test` run exited 1 solely because of 2 unrelated failures in packages/sqlite test/operation-baseline-reconcile.test.ts (2 failed | 1556 passed | 4 skipped); every adapter-relevant package was green."
+  },
+  "requirements": [
+    {
+      "task_id": "D13-TS-ADAPTERS-081",
+      "requirement": "deterministic mock normal CI",
+      "result": "passed",
+      "reference": "packages/adapters/test/no-host-io.test.ts plus corpus environmentAssertions; the corpus nonClaims state deterministic-mock evidence only, no network access, no credential, no clock; CI job cross-language-conformance runs `pnpm test:conformance` with persist-credentials: false and no vendor secret"
+    },
+    {
+      "task_id": "D13-TS-ADAPTERS-081",
+      "requirement": "provider and HTTP envelopes",
+      "result": "passed",
+      "reference": "packages/adapters/src/http-adapter.ts with injected transport and no network fallback; 21 stream, 21 usage and 29 error cases joined member for member in the cross-language adapter conformance run"
+    },
+    {
+      "task_id": "D13-TS-ADAPTERS-081",
+      "requirement": "shell and MCP capability denial",
+      "result": "passed",
+      "reference": "shell adapter refuses execution outright (packages/adapters/test/shell-adapter.test.ts, commit 173cbf9); 31 preflight cases and the 11-denial-reason vocabulary including mcp-mutation-not-approved and mcp-tool-not-allowlisted joined; note that only the denial paths exist, no MCP client transport is implemented"
+    },
+    {
+      "task_id": "D13-TS-ADAPTERS-081",
+      "requirement": "rate circuit fallback cancellation and redaction",
+      "result": "not-satisfied",
+      "reference": "retry/rate (13 retry cases incl. GE_ADAPTER_RATE_LIMITED), circuit (7 circuit cases, packages/adapters/src/circuit.ts), cancellation (cancellation describe blocks in http-adapter and mock-adapter tests) and redaction (forbiddenMarkers scanned in the join) are all evidenced, but no fallback surface exists: packages/adapters/src/http-adapter.ts documents 'There is no default transport and no network fallback', and no fallback chain is implemented or tested in either language"
+    },
+    {
+      "task_id": "D13-PY-ADAPTERS-082",
+      "requirement": "deterministic mock normal CI",
+      "result": "passed",
+      "reference": "python/tests/test_adapter_no_host_io.py and the same mock-only join; normal CI executes the join without credentials"
+    },
+    {
+      "task_id": "D13-PY-ADAPTERS-082",
+      "requirement": "provider and HTTP envelopes",
+      "result": "passed",
+      "reference": "python/src/graph_engineering/adapters/http_adapter.py; the same 165-case join exercised the Python half via tools/conformance/python_adapter_report.py with 131/131 registered rules and 0 divergences"
+    },
+    {
+      "task_id": "D13-PY-ADAPTERS-082",
+      "requirement": "shell and MCP capability denial",
+      "result": "passed",
+      "reference": "python/tests/test_adapter_shell.py; same denial-reason vocabulary joined; as in TypeScript, only denial paths exist and no MCP client transport is implemented"
+    },
+    {
+      "task_id": "D13-PY-ADAPTERS-082",
+      "requirement": "rate circuit fallback cancellation and redaction",
+      "result": "not-satisfied",
+      "reference": "same finding as the TypeScript lane: retry/rate, circuit, cancellation and redaction evidenced; fallback does not exist by documented design in either lane"
+    },
+    {
+      "task_id": "D13-ADAPTERS-049",
+      "requirement": "shared deterministic mock parity",
+      "result": "passed",
+      "reference": "cross-language adapter conformance: 165 declared cases, 14/14 error codes injectable through both real mock adapters, 0 disclosed and 0 observed divergences"
+    },
+    {
+      "task_id": "D13-ADAPTERS-049",
+      "requirement": "HTTP/shell/MCP envelope parity",
+      "result": "passed",
+      "reference": "35 descriptor, 31 preflight, 21 stream, 21 usage, 8 tool and 29 error cases compared code, rule identifier and projection member for member across the 8-kind adapter inventory"
+    },
+    {
+      "task_id": "D13-ADAPTERS-049",
+      "requirement": "fallback cancellation and redaction parity",
+      "result": "not-satisfied",
+      "reference": "cancellation and redaction parity are joined (cancellation cases plus forbiddenMarkers with 0 detections); fallback parity cannot be evidenced because no fallback surface exists in either implementation"
+    },
+    {
+      "task_id": "D13-ADAPTERS-049",
+      "requirement": "live vendor results remain opt-in and separately identified",
+      "result": "passed",
+      "reference": "corpus nonClaims: live-provider evidence is opt-in, quarantined and separately gated, and can never substitute for the deterministic corpus; no vendor client exists in the repository, so no live result can leak into normal evidence"
+    },
+    {
+      "task_id": "D13-ADAPTERS-049",
+      "requirement": "normal CI uses only deterministic mock providers while real providers remain opt-in or nightly",
+      "result": "passed",
+      "reference": ".github/workflows/ci.yml cross-language-conformance job runs `pnpm test:conformance` (which is the deterministic join) with persist-credentials: false and no provider secret; no CI job contacts a provider"
+    }
+  ],
+  "exclusions": [
+    "spec/conformance/adapter.case.json at the candidate still declares implementationClaim false, contractStatus contract-only-native-implementation-required, and the nonClaim 'No TypeScript or Python adapter exists.' Those statements are stale relative to packages/adapters and python/src/graph_engineering/adapters, but the corpus governance requires the implementing lane to flip them in a deliberate reviewed edit; this evidence file does not and cannot flip them.",
+    "The registered expected artifact python/tests/adapters (D13-PY-ADAPTERS-082) does not exist; the Python adapter tests live flat as python/tests/test_adapter_*.py (8 files). The registered artifact path is unsatisfiable without either moving tests or amending the registry contract.",
+    "The registered expected artifact codex_logs/release-evidence/adapters (D13-ADAPTERS-049) did not exist before this evidence run; codex_logs/release-evidence/adapters/manifest.json is written alongside this file and records only the join results reproduced above.",
+    "D13-ADAPTER-SPEC-048, the dependency of both native lanes, is still status planned in the registry, and scripts/check-task-graph.mjs fails any completed task whose predecessor is not completed. None of the three tasks here can move to completed unless the 048 -> 081/082 -> 049 chain moves together.",
+    "No live vendor adapter, no MCP client transport, and no fallback chain exist; nothing here claims them."
+  ]
+}

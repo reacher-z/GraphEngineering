@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "task-source-candidate",
+  "recorded_at": "2026-08-04T19:12:00Z",
+  "tasks": [
+    "D9-OPS-CONTROL-085"
+  ],
+  "candidate": {
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "base_revision": "d242b65e6f5b8e77ab2ed5c4d09ea518d4af0d52",
+    "branch_at_recording": "feat/authoring-foundation"
+  },
+  "landing_commits": [
+    {
+      "revision": "3fff8d68b47566f25f3ad345070579fa3671fbaf",
+      "subject": "feat(cli): durable operational commands in both languages"
+    },
+    {
+      "revision": "e6d60d64aa2eaa7b10932bcacb36e38b1c7b1180",
+      "subject": "fix: stop laundering policy denials and let the CLI read current runs"
+    }
+  ],
+  "source_digests": [
+    {
+      "path": "tools/conformance/cli-operations.case.json",
+      "sha256": "518660764d4b4c571e3b4f01d484da81158172dc139771d66e63c7efd154cb74"
+    },
+    {
+      "path": "docs/CLI.md",
+      "sha256": "b954f61c8d93242536b96c18b5b3f32f08f20127c324e3b53a77c62f74def2c0"
+    }
+  ],
+  "environment": {
+    "cwd": "/home/nick/work/GraphEngineering",
+    "os": "Linux 7.0.0-28-generic x86_64",
+    "node": "v22.23.1",
+    "pnpm": "10.13.1",
+    "python": "3.14.4",
+    "uv": "0.11.11"
+  },
+  "clean_worktree_revalidation": {
+    "worktree_kind": "detached temporary worktree",
+    "revision": "e60baf9832b771e2bf297d96756797d8c83a18c1",
+    "tree": "a41b3c7192c3a70c656969fa34c4e073a9f82744",
+    "setup": [
+      {
+        "argv": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["corepack", "pnpm", "build"],
+        "result": "passed",
+        "exit_code": 0
+      },
+      {
+        "argv": ["uv", "sync", "--project", "python", "--extra", "dev", "--locked"],
+        "result": "passed",
+        "exit_code": 0
+      }
+    ],
+    "checks": [
+      {
+        "argv": ["corepack", "pnpm", "--filter", "@graph-engineering/cli", "test"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "232 tests, 232 pass, 0 fail (node --test TAP output)"
+      },
+      {
+        "argv": ["uv", "run", "--project", "python", "pytest", "-q", "python/tests/test_cli_operations.py"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "82 passed"
+      },
+      {
+        "argv": ["node", "tools/conformance/run.mjs"],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "Cross-language durable CLI operations conformance passed for 158 cases over 39 shared journals (15 protected events/v1alpha2, 23 legacy events/v1alpha1, 1 absent) (138 read invocations, 134 append-free proofs, 18 fail-closed refusals, exit codes 0/2/4/5/6, journal contracts events/v1alpha1+events/v1alpha2); claims {\"durableCancellationClaim\":false,\"durableResumeClaim\":false,\"durableReplayClaim\":false,\"durableForkClaim\":false,\"durableNodeRetryClaim\":false}"
+      }
+    ],
+    "result": "passed-with-notes",
+    "summary": "The read-only durable operational surface (status/inspect/logs over both journal contracts, byte-identical envelopes, fail-closed refusals for unimplemented capabilities) is landed and joined across 158 shared cases. The full workspace `corepack pnpm test` exited 1 only because of 2 unrelated packages/sqlite failures."
+  },
+  "requirements": [
+    {
+      "task_id": "D9-OPS-CONTROL-085",
+      "requirement": "status watch inspect and logs",
+      "result": "not-satisfied",
+      "reference": "status, inspect and logs exist in both CLIs and are joined over 138 read invocations; there is no watch command in packages/cli/src or python/src/graph_engineering/cli.py, and docs/CLI.md documents only the three read commands"
+    },
+    {
+      "task_id": "D9-OPS-CONTROL-085",
+      "requirement": "pause resume cancel and retry",
+      "result": "not-satisfied",
+      "reference": "none of these operations is implemented: docs/CLI.md 'Unimplemented durable operations' documents cancel/resume/replay/fork/retry as deliberate fail-closed refusals (GECLI_UNSUPPORTED_CAPABILITY, exit 6; 18 fail-closed refusals witnessed in the join), pause does not exist as a command at all, and the corpus claims durableCancellationClaim/durableResumeClaim/durableReplayClaim/durableForkClaim/durableNodeRetryClaim are all literally false"
+    },
+    {
+      "task_id": "D9-OPS-CONTROL-085",
+      "requirement": "stable JSON envelopes and exits",
+      "result": "passed",
+      "reference": "closed ordered data allowlists per command, byte-identical stdout/stderr and identical exit codes joined across 158 cases; exit codes 0/2/4/5/6 all witnessed by the corpus"
+    },
+    {
+      "task_id": "D9-OPS-CONTROL-085",
+      "requirement": "race and stale-operation rejection",
+      "result": "not-satisfied",
+      "reference": "no mutating operation exists, so no race or stale-operation path exists to test; the closest evidence is the append-free proofs (134) showing read commands never mutate the store, which is a different property"
+    }
+  ],
+  "exclusions": [
+    "The registered expected artifact python/src/graph_engineering/cli does not exist as a directory; the Python surface landed as python/src/graph_engineering/cli.py and cli_operations.py. packages/cli/src and docs/CLI.md exist as registered.",
+    "Both registry dependencies of this task, D9-DURABLE-EXT-CONFORMANCE-034 and D8-RUNTIME-CHAOS-084, are status planned; scripts/check-task-graph.mjs forbids completing a task over non-completed predecessors.",
+    "This task as registered is a superset of what landed: the landed work is a read-only operational surface plus honest refusals. Registered mutating operations (pause/resume/cancel/retry) and watch are not implemented anywhere at the candidate."
+  ]
+}
