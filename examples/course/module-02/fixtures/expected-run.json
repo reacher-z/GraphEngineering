@@ -1,0 +1,16 @@
+{
+  "graphHash": "60f253ad55fad3083a67caf7e8353b50ac812407064482a5f2afb16b1fce8357",
+  "status": "succeeded",
+  "maxObservedConcurrency": 1,
+  "totalAttempts": 4,
+  "nodeAttempts": {
+    "extract": 1,
+    "enrich": 2,
+    "format": 1
+  },
+  "output": {
+    "report": {
+      "summary": "[long] retries move to the failing node (6 words)"
+    }
+  }
+}

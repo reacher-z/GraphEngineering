@@ -1,0 +1,12 @@
+{
+  "graphHash": "f8c0811a5c9fe82c47083c475f06b055099a86a524324d773129a43aacc56ffc",
+  "status": "succeeded",
+  "maxObservedConcurrency": 1,
+  "totalAttempts": 2,
+  "output": {
+    "invoice": {
+      "invoiceLine": "AB-12: 3 x $19.50 each = $58.50",
+      "totalCents": 5850
+    }
+  }
+}

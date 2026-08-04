@@ -1,0 +1,9 @@
+{
+  "status": "succeeded",
+  "nodeAttempts": {
+    "extract": 1,
+    "enrich": 1,
+    "format": 2
+  },
+  "totalAttempts": 4
+}

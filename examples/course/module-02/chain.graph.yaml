@@ -1,0 +1,72 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  description: 'Teaching chain: extract, enrich (flaky once, retried in place), format - a graph with no branching'
+  name: course-module-02-chain
+  version: 1.0.0
+inputSchema:
+  type: object
+  additionalProperties: false
+  required:
+  - bulletin
+  properties:
+    bulletin:
+      type: string
+      minLength: 1
+outputSchema:
+  type: object
+entrypoints:
+- extract
+outputs:
+  report:
+    node: format
+nodes:
+- id: extract
+  kind: transform
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    operation: extract
+  sideEffects: none
+- id: enrich
+  kind: agent
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    role: Tag the extracted headline
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- id: format
+  kind: transform
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    operation: format
+  sideEffects: none
+edges:
+- id: extract-enrich
+  from:
+    node: extract
+  to:
+    node: enrich
+    port: extracted
+  mode: value
+- id: enrich-format
+  from:
+    node: enrich
+  to:
+    node: format
+    port: enriched
+  mode: value
+policies:
+  maxConcurrency: 1
+  maxDepth: 8
+  maxFanOut: 2
+  maxTotalAttempts: 6

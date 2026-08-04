@@ -1,0 +1,70 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": {
+    "name": "course-module-02-chain-no-retry",
+    "version": "1.0.0",
+    "description": "Exercise 2 solution: the teaching chain with no retry declaration anywhere, so the first flake is fatal"
+  },
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["bulletin"],
+    "properties": {
+      "bulletin": { "type": "string", "minLength": 1 }
+    }
+  },
+  "outputSchema": {
+    "type": "object"
+  },
+  "entrypoints": ["extract"],
+  "outputs": {
+    "report": { "node": "format" }
+  },
+  "nodes": [
+    {
+      "id": "extract",
+      "kind": "transform",
+      "inputSchema": { "type": "object" },
+      "outputSchema": { "type": "object" },
+      "config": { "operation": "extract" },
+      "sideEffects": "none"
+    },
+    {
+      "id": "enrich",
+      "kind": "agent",
+      "inputSchema": { "type": "object" },
+      "outputSchema": { "type": "object" },
+      "config": { "role": "Tag the extracted headline" },
+      "sideEffects": "none"
+    },
+    {
+      "id": "format",
+      "kind": "transform",
+      "inputSchema": { "type": "object" },
+      "outputSchema": { "type": "object" },
+      "config": { "operation": "format" },
+      "sideEffects": "none"
+    }
+  ],
+  "edges": [
+    {
+      "id": "extract-enrich",
+      "from": { "node": "extract" },
+      "to": { "node": "enrich", "port": "extracted" },
+      "mode": "value"
+    },
+    {
+      "id": "enrich-format",
+      "from": { "node": "enrich" },
+      "to": { "node": "format", "port": "enriched" },
+      "mode": "value"
+    }
+  ],
+  "policies": {
+    "maxConcurrency": 1,
+    "maxDepth": 8,
+    "maxFanOut": 2,
+    "maxTotalAttempts": 6
+  }
+}

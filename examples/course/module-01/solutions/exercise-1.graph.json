@@ -1,0 +1,69 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": {
+    "name": "course-module-01-typed-edge-currency",
+    "version": "1.0.0",
+    "description": "Exercise 1 solution: the typed edge contract widened with a required currency field"
+  },
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["sku", "quantity", "unitPriceCents"],
+    "properties": {
+      "sku": { "type": "string", "minLength": 1 },
+      "quantity": { "type": "integer", "minimum": 1 },
+      "unitPriceCents": { "type": "integer", "minimum": 0 }
+    }
+  },
+  "outputSchema": {
+    "type": "object"
+  },
+  "entrypoints": ["price-order"],
+  "outputs": {
+    "invoice": { "node": "write-invoice" }
+  },
+  "nodes": [
+    {
+      "id": "price-order",
+      "kind": "transform",
+      "inputSchema": { "type": "object" },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sku", "quantity", "unitPriceCents", "totalCents", "currency"],
+        "properties": {
+          "sku": { "type": "string" },
+          "quantity": { "type": "integer" },
+          "unitPriceCents": { "type": "integer" },
+          "totalCents": { "type": "integer" },
+          "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+        }
+      },
+      "config": { "operation": "price-order" },
+      "sideEffects": "none"
+    },
+    {
+      "id": "write-invoice",
+      "kind": "transform",
+      "inputSchema": { "type": "object" },
+      "outputSchema": { "type": "object" },
+      "config": { "operation": "write-invoice" },
+      "sideEffects": "none"
+    }
+  ],
+  "edges": [
+    {
+      "id": "order-invoice",
+      "from": { "node": "price-order" },
+      "to": { "node": "write-invoice", "port": "order" },
+      "mode": "value"
+    }
+  ],
+  "policies": {
+    "maxConcurrency": 1,
+    "maxDepth": 4,
+    "maxFanOut": 2,
+    "maxTotalAttempts": 4
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "status": "failed",
+  "nodeAttempts": {
+    "extract": 1,
+    "enrich": 1,
+    "format": 0
+  },
+  "enrichFailureCode": "NODE_EXECUTION_FAILED",
+  "formatStatus": "skipped",
+  "formatFailureCode": "UPSTREAM_FAILED"
+}

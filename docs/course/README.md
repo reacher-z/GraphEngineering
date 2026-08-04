@@ -10,7 +10,7 @@ twelve artifacts exist and their runners exit 0.
 
 ## Status
 
-**One module of fourteen is complete.** This table is the honest state as of
+**Three modules of fourteen are complete.** This table is the honest state as of
 v0.2.0-alpha.2, not a roadmap. "Blocked" names the missing runtime capability
 (from [`CHANGELOG.md`](../../CHANGELOG.md), "What is not in this release");
 "not started" with no blocker means the runtime could support the module
@@ -18,8 +18,8 @@ today and only the course material is missing.
 
 | # | Module | Status |
 | --- | --- | --- |
-| 1 | **Nodes and real data edges** — distinguish dependency from typing order and draw values crossing edges. | Not started. Runnable today on the ordinary schedulers. |
-| 2 | **Linear chain as a degenerate graph** — remove fake edges and compare critical path. | Not started. Runnable today. |
+| 1 | **Nodes and real data edges** — distinguish dependency from typing order and draw values crossing edges. | **Complete.** [Module document](./module-01-typed-edges.md) · [executable artifacts](../../examples/course/module-01/). |
+| 2 | **Linear chain as a degenerate graph** — remove fake edges and compare critical path. | **Complete.** [Module document](./module-02-linear-chain.md) · [executable artifacts](../../examples/course/module-02/). |
 | 3 | **Closed node contracts** — structured input/output, validation, failures, capability, and budget. | Not started. Partially blocked: capability and budget declarations are refused pre-dispatch or ignored — nothing observes what a node actually does at execution time. |
 | 4 | **Edges as deterministic plumbing** — transforms, dedupe, artifacts, streams, and why not every combine needs a model. | Not started. Partially blocked: `stream` and `artifact-ref` edge modes and `map` are refused pre-dispatch (`edge-mode:stream`, `edge-mode:artifact-ref`, `edge-map`); only `value` edges execute. |
 | 5 | **Fan-out** — bounded native parallelism, partial failure, cancellation, and resource accounting. | Not started. Bounded parallelism and partial failure are runnable today; resource accounting is blocked — `resources` is refused pre-dispatch (`resource-admission`). |
@@ -36,14 +36,16 @@ today and only the course material is missing.
 The master plan (§22.2) also names an optional fifteenth chapter, **When not
 to use a graph**. Not started.
 
-## Running the complete module
+## Running the complete modules
 
 ```bash
-node examples/course/module-07/run.mjs                                  # exit 0
-uv run --project python python examples/course/module-07/run.py         # exit 0
-node examples/course/module-07/wrong.test.mjs                           # exit 0 (the bug is detected)
-uv run --project python pytest examples/course/module-07/wrong_test.py  # exit 0
-node examples/course/module-07/check-exercises.mjs                      # exit 0 (solutions verified)
+for m in module-01 module-02 module-07; do
+  node "examples/course/$m/run.mjs"                                     # exit 0
+  uv run --project python python "examples/course/$m/run.py"            # exit 0
+  node "examples/course/$m/wrong.test.mjs"                              # exit 0 (the bug is detected)
+  uv run --project python pytest "examples/course/$m/wrong_test.py"     # exit 0
+  node "examples/course/$m/check-exercises.mjs"                         # exit 0 (solutions verified)
+done
 ```
 
 Build prerequisite, if `packages/*/dist` is missing:
@@ -58,5 +60,6 @@ output, (6) one common incorrect implementation, (7) one failing test that
 exposes the error, (8) the repaired implementation, (9) performance, cost,
 security, and durability implications, (10) CLI/SDK launch instructions,
 (11) exercises with machine-checkable solutions, and (12) version and
-known-limit references. [Module 7](./module-07-diamond.md) maps each artifact
-to its file.
+known-limit references. [Module 1](./module-01-typed-edges.md),
+[module 2](./module-02-linear-chain.md), and
+[module 7](./module-07-diamond.md) each map every artifact to its file.
