@@ -27,7 +27,13 @@ from graph_engineering import (
     start_graph_run,
 )
 from graph_engineering.durable import ATTEMPT_TEMPLATE_MESSAGES
+from graph_engineering.durable_protection import (
+    PayloadProtection,
+    default_durable_capture_policy,
+)
 from graph_engineering.persistence import MemoryEventStore
+from graph_engineering.redaction.keys import DeterministicTestKeyProvider
+from graph_engineering.redaction.protect import FileProtectedPayloadStore
 from graph_engineering.redaction.scan import encoded_forms
 from tests.durable_support import (
     file_journal,
@@ -396,6 +402,159 @@ def test_an_attempt_failure_carries_a_template_message_and_no_host_cause_name(
     assert attempt_failed["payloadDisposition"] == "metadata-only"
     assert "evidenceRef" not in attempt_failed["data"]
     assert CANARIES["failure-detail"] not in json.dumps(attempt_failed)
+
+
+def _protection_with_policy(root: Path, **overrides: str) -> PayloadProtection:
+    """A file-backed protection authority under a policy widened from default."""
+
+    from dataclasses import replace
+
+    key_provider = DeterministicTestKeyProvider(key_ref="test://deterministic/key-1")
+    policy = replace(default_durable_capture_policy(key_provider.key_ref), **overrides)  # type: ignore[arg-type]
+    return PayloadProtection(
+        key_provider=key_provider,
+        payload_store=FileProtectedPayloadStore(str(root)),
+        policy=policy,
+    )
+
+
+def _failed_attempt_documents(
+    tmp_path: Path, **policy_overrides: str
+) -> list[dict[str, Any]]:
+    """Run one failing single-node graph and return the persisted journal."""
+
+    async def scenario() -> list[dict[str, Any]]:
+        store = file_journal(tmp_path / "store")
+        protection = _protection_with_policy(
+            tmp_path / "store" / "protected", **policy_overrides
+        )
+
+        def root(_: NodeContext) -> Any:
+            raise RuntimeError(CANARIES["failure-detail"])
+
+        await start_graph_run(
+            single_graph(),
+            {},
+            {"root": root},
+            run_id="failure-evidence",
+            implementation_id="v1",
+            event_store=store,
+            payload_protection=protection,
+            clock=fixed_clock,
+        )
+        return [
+            json.loads(line)
+            for line in store.path_for_run("failure-evidence").read_bytes().splitlines()
+        ]
+
+    return asyncio.run(scenario())
+
+
+def test_protected_evidence_alone_flips_the_attempt_failure_to_the_protected_shape(
+    tmp_path: Path,
+) -> None:
+    """Section 6.1: `errors: "protected-evidence"` is the one operator lever.
+
+    With every other control at the Section 4.1 default (events stays
+    `metadata-or-protected`), the NodeAttemptFailed record carries the raw
+    evidence as a protected reference — and only as a protected reference.
+    """
+
+    documents = _failed_attempt_documents(tmp_path, errors="protected-evidence")
+    attempt_failed = next(item for item in documents if item["type"] == "NodeAttemptFailed")
+    assert attempt_failed["payloadDisposition"] == "protected-ref"
+    assert sorted(attempt_failed["data"]) == [
+        "evidenceMac",
+        "evidenceRef",
+        "failure",
+        "terminal",
+    ]
+    # Section 6.1: the adjacent MAC equals the reference's valueMac.
+    assert (
+        attempt_failed["data"]["evidenceMac"]
+        == attempt_failed["data"]["evidenceRef"]["valueMac"]
+    )
+    # The raw text still never reaches the journal inline.
+    assert CANARIES["failure-detail"] not in json.dumps(documents)
+
+
+def test_codes_only_is_a_disabled_mode_and_captures_no_evidence(tmp_path: Path) -> None:
+    """Section 1.2/4.1: codes-only means stable codes only, no payload evidence.
+
+    `errors: "codes-only"` differs from the default profile, but it is a
+    disabled mode, so the pair stays off and the record stays metadata-only —
+    the same verdict the TypeScript lane's `controlEnabled` has always given.
+    """
+
+    documents = _failed_attempt_documents(tmp_path, errors="codes-only")
+    attempt_failed = next(item for item in documents if item["type"] == "NodeAttemptFailed")
+    assert attempt_failed["payloadDisposition"] == "metadata-only"
+    assert sorted(attempt_failed["data"]) == ["failure", "terminal"]
+    assert CANARIES["failure-detail"] not in json.dumps(documents)
+
+
+def test_widening_an_unrelated_control_is_not_protected_evidence_policy(
+    tmp_path: Path,
+) -> None:
+    """Section 6.1: only the `errors` mode is the evidence lever.
+
+    Widening the event sink's own control (`events: "allow-redacted"`) enables
+    the Section 1.2 pair, but raw evidence still requires
+    `errors: "protected-evidence"`, so the record stays metadata-only.
+    """
+
+    documents = _failed_attempt_documents(tmp_path, events="allow-redacted")
+    attempt_failed = next(item for item in documents if item["type"] == "NodeAttemptFailed")
+    assert attempt_failed["payloadDisposition"] == "metadata-only"
+    assert sorted(attempt_failed["data"]) == ["failure", "terminal"]
+    assert CANARIES["failure-detail"] not in json.dumps(documents)
+
+
+def test_the_shared_evidence_predicate_is_pinned_mode_by_mode() -> None:
+    """The pure Section 6.1/1.2 predicate both language lanes share."""
+
+    from dataclasses import replace
+
+    from graph_engineering.durable_protection import diagnostic_evidence_authorized
+    from graph_engineering.redaction.policy import control_enabled, policy_enabled_for
+
+    default = default_durable_capture_policy("test://deterministic/key-1")
+    cases: list[tuple[dict[str, str], bool]] = [
+        ({}, False),
+        ({"errors": "protected-evidence"}, True),
+        ({"errors": "codes-only"}, False),
+        ({"errors": "codes-and-sanitized-message"}, False),
+        ({"events": "allow-redacted"}, False),
+        ({"errors": "protected-evidence", "events": "allow-redacted"}, True),
+    ]
+    for overrides, expected in cases:
+        policy = replace(default, **overrides)  # type: ignore[arg-type]
+        assert diagnostic_evidence_authorized(policy, "event-journal") is expected, overrides
+    # Section 1.2: the pair-enablement formula spans the union of the source
+    # row's control and the sink row's controls. codes-only widens the union but
+    # is itself disabled; an events widening enables the pair without enabling
+    # the stricter Section 6.1 evidence gate above.
+    assert policy_enabled_for(default, "exception-message", "event-journal") is False
+    assert (
+        policy_enabled_for(
+            replace(default, errors="codes-only"), "exception-message", "event-journal"
+        )
+        is False
+    )
+    assert (
+        policy_enabled_for(
+            replace(default, errors="protected-evidence"), "exception-message", "event-journal"
+        )
+        is True
+    )
+    assert (
+        policy_enabled_for(
+            replace(default, events="allow-redacted"), "exception-message", "event-journal"
+        )
+        is True
+    )
+    assert control_enabled(replace(default, errors="codes-only"), "errors") is False
+    assert control_enabled(default, "errors") is True
 
 
 # ----------------------------------------------------------------------

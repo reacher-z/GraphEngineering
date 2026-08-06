@@ -93,6 +93,18 @@ function checkpointSummary(checkpoint: StoredCheckpoint): CheckpointSummary {
   return { apiVersion, runId, checkpointId, sequence, createdAt, contentHash: hash };
 }
 
+/**
+ * The unguarded `checkpoints/v1alpha1` local file store.
+ *
+ * Documented limitation: `save` persists the caller-supplied `state` verbatim —
+ * plaintext application values reach the temporary and final checkpoint files.
+ * spec/redaction-semantics.md treats such content as legacy-inline data
+ * (Section 6.2). For a write path where every application value is a
+ * checkpoint-bound protected reference and no plaintext byte ever reaches a
+ * temporary or final file, use `GuardedFileCheckpointStore` together with
+ * `ProtectedCheckpointWriter` (`checkpoints/v1alpha2`), which accepts only
+ * guard-minted `PreparedSinkWrite` capabilities.
+ */
 export class FileCheckpointStore implements CheckpointStore {
   readonly #rootDirectory: string;
   readonly #now: () => Date;

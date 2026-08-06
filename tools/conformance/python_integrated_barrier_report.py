@@ -18,18 +18,24 @@ entry point. Tranche 2 (``evaluationCases``, ``identityCases``, ``replayCases``,
 ``route_policy_hash``, ``barrier_decision_id`` / ``route_decision_id``,
 ``fold_committed_decisions`` and ``validate_decision_identifiers`` — and every
 hash it prints is recomputed here from the framing rule, never read out of the
-corpus ``expect`` block and never read across from TypeScript.
+corpus ``expect`` block and never read across from TypeScript. Every replay
+case additionally drives the real ordinary scheduler ``run_graph`` with
+executors that record every call, so the zero-executor-call claim is an
+authentic scheduler observation on this side of the join too.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
+from graph_engineering import DecisionContext, NodeContext, compile_graph, run_graph
 from graph_engineering.canonical import canonical_json
 from graph_engineering.compiler import Diagnostic, try_compile_graph
 from graph_engineering.integrated_barrier import (
+    BARRIER_POLICY_API_VERSION,
     BarrierPolicyValidation,
     IntegratedBarrierPolicySnapshot,
     InvalidBarrierPolicy,
@@ -376,6 +382,153 @@ class ExecutorLedger:
         self.calls.append(node_id)
 
 
+BARRIER_REPLAY_SOURCE_NODES = ("a", "b", "c")
+
+
+def barrier_replay_node(node_id: str, **overrides: Any) -> dict[str, Any]:
+    return {
+        "id": node_id,
+        "kind": "transform",
+        "inputSchema": {},
+        "outputSchema": {},
+        "config": {},
+        **overrides,
+    }
+
+
+def barrier_replay_graph(case: dict[str, Any]) -> dict[str, Any]:
+    """A graph carrying exactly the replay case's currently compiled policies,
+    so ``run_graph`` exercises the real scheduler rather than the fold in
+    isolation. Three upstreams keep every corpus threshold within the
+    incoming-edge count, so GE1424 never fires and the graph always compiles.
+    The same graph is derived by the same rule in the Node half of the join;
+    the corpus case is its only input.
+    """
+
+    entries = list(case["currentPolicies"].items())
+    barriers = [
+        (node_id, config)
+        for node_id, config in entries
+        if config.get("apiVersion") == BARRIER_POLICY_API_VERSION
+    ]
+    routers = [
+        (node_id, config)
+        for node_id, config in entries
+        if config.get("apiVersion") != BARRIER_POLICY_API_VERSION
+    ]
+    return {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "integrated-barrier-replay", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["root"],
+        "outputs": {"result": {"node": "root"}},
+        "nodes": [
+            barrier_replay_node("root"),
+            *(barrier_replay_node(source) for source in BARRIER_REPLAY_SOURCE_NODES),
+            *(
+                barrier_replay_node(node_id, kind="router", config=config)
+                for node_id, config in routers
+            ),
+            *(
+                barrier_replay_node(f"{node_id}-{route}")
+                for node_id, config in routers
+                for route in config["allowedRoutes"]
+            ),
+            *(
+                barrier_replay_node(node_id, kind="barrier", config=config)
+                for node_id, config in barriers
+            ),
+        ],
+        "edges": [
+            *(
+                {
+                    "id": f"root-{source}",
+                    "from": {"node": "root"},
+                    "to": {"node": source, "port": source},
+                }
+                for source in BARRIER_REPLAY_SOURCE_NODES
+            ),
+            *(
+                {
+                    "id": f"root-{node_id}",
+                    "from": {"node": "root"},
+                    "to": {"node": node_id},
+                }
+                for node_id, _ in routers
+            ),
+            # GE1407 requires every allowed route to carry a case.
+            *(
+                {
+                    "id": f"{node_id}-{route}",
+                    "from": {"node": node_id},
+                    "to": {"node": f"{node_id}-{route}"},
+                    "condition": {
+                        "apiVersion": (
+                            "graphengineering.reacher-z.github.io/"
+                            "pattern-conditions/v1alpha1"
+                        ),
+                        "kind": "RouteEquals",
+                        "routeKey": route,
+                    },
+                }
+                for node_id, config in routers
+                for route in config["allowedRoutes"]
+            ),
+            *(
+                {
+                    "id": f"{source}-{node_id}",
+                    "from": {"node": source},
+                    "to": {"node": node_id, "port": source},
+                }
+                for node_id, _ in barriers
+                for source in BARRIER_REPLAY_SOURCE_NODES
+            ),
+        ],
+    }
+
+
+def drive_replay_scheduler(case: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """Drive the real ``run_graph`` with executors that record every call.
+
+    A spy executor is registered for every policy-carrying node; the committed
+    history is handed to the scheduler, which folds it before any dispatch. The
+    returned evidence is the authentic scheduler observation: the run status,
+    the nodes whose executors were actually called (always none), and the
+    number of decision events the run appended (always zero, because an adopted
+    decision is never re-judged and a rejection dispatches nothing).
+    """
+
+    spied: list[str] = []
+
+    def spy(context: NodeContext) -> Any:
+        spied.append(context.node.id)
+        return "must-not-run"
+
+    def source_handler(context: NodeContext) -> Any:
+        return "ok"
+
+    handlers: dict[str, Any] = {node_id: spy for node_id in case["currentPolicies"]}
+    for source in BARRIER_REPLAY_SOURCE_NODES:
+        handlers[source] = source_handler
+
+    result = asyncio.run(
+        run_graph(
+            compile_graph(barrier_replay_graph(case)),
+            {},
+            handlers,
+            decision=DecisionContext(str(case["runId"]), int(case["graphRevision"])),
+            committed_decisions=case["history"],
+        )
+    )
+    scheduler_evidence = {
+        "status": result.status.value,
+        "spiedNodeIds": list(spied),
+    }
+    return scheduler_evidence, len(result.decision_events)
+
+
 def replay_report(case: dict[str, Any]) -> dict[str, Any]:
     name = str(case["name"])
     run_id = str(case["runId"])
@@ -397,12 +550,16 @@ def replay_report(case: dict[str, Any]) -> dict[str, Any]:
             if node_id not in set(adopted_node_ids):
                 ledger.execute(node_id)
 
+    scheduler_evidence, appended_decision_events = drive_replay_scheduler(case)
+
     entry: dict[str, Any] = {
         "outcome": "adopted" if type(outcome) is DecisionAdoption else "rejected",
         "adoptedNodeIds": adopted_node_ids,
-        "appendedDecisionEvents": outcome.appended_decision_events,
+        # Observed by driving the real scheduler, not restated from the fold.
+        "appendedDecisionEvents": appended_decision_events,
         "executorCalls": len(ledger.calls),
         "executedNodeIds": list(ledger.calls),
+        "scheduler": scheduler_evidence,
         # Recomputed natively for every event in the history, whatever the
         # outcome: this is what makes a forked child run recompute its own
         # identity instead of inheriting the parent's.

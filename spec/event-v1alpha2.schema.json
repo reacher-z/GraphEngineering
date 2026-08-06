@@ -36,6 +36,7 @@
         "NodeRetried",
         "NodeSucceeded",
         "EdgeEmitted",
+        "BarrierSatisfied",
         "RunCancelled",
         "RunFailed",
         "RunSucceeded"
@@ -201,6 +202,19 @@
             "type": { "const": "EdgeEmitted" },
             "payloadDisposition": { "const": "metadata-only" },
             "data": { "$ref": "#/$defs/edgeEmittedData" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/$defs/nodeWithoutAttemptIdentity" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "BarrierSatisfied" },
+            "payloadDisposition": { "const": "protected-ref" },
+            "data": { "$ref": "#/$defs/barrierSatisfiedData" }
           }
         }
       ]
@@ -484,6 +498,31 @@
       "required": ["outputMac"],
       "properties": {
         "outputMac": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "barrierDecisionResolution": {
+      "description": "The closed resolution set of barrier-decision.schema.json #/properties/resolution, mirrored inline because that schema lives in the v1alpha1 directory and this file resolves only same-directory references.",
+      "enum": ["satisfied", "failed", "unknown", "awaiting_human"]
+    },
+    "barrierSatisfiedData": {
+      "description": "One committed integrated-barrier decision. `decisionRef` protects the frozen barrier-decision.schema.json document (emitted for every committed decision, satisfied or not); the decision document is authoritative content and never appears inline. The closed inline projection carries the two domain-separated identities (`policyHash`, `decisionId`) and the two decision enums, and each MUST equal the same member of the protected document.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisionRef",
+        "decisionMac",
+        "policyHash",
+        "decisionId",
+        "satisfied",
+        "resolution"
+      ],
+      "properties": {
+        "decisionRef": { "$ref": "protected-value.schema.json" },
+        "decisionMac": { "$ref": "#/$defs/sha256" },
+        "policyHash": { "$ref": "#/$defs/sha256" },
+        "decisionId": { "$ref": "#/$defs/sha256" },
+        "satisfied": { "type": "boolean" },
+        "resolution": { "$ref": "#/$defs/barrierDecisionResolution" }
       }
     },
     "terminalData": {

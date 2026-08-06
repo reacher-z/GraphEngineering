@@ -901,17 +901,47 @@ class _CycleController:
         context: CycleActivityContext,
         binding: CycleActivityBinding,
     ) -> _Invocation:
-        async def call() -> object:
-            if inspect.iscoroutinefunction(handler):
-                return await cast(Callable[[CycleActivityContext], Awaitable[object]], handler)(
-                    context
-                )
-            value = await asyncio.to_thread(handler, context)
-            if inspect.isawaitable(value):
-                return await cast(Awaitable[object], value)
-            return value
+        if not inspect.iscoroutinefunction(handler):
+            # D8-CYCLE-TIMEOUT-DIVERGENCE-090 resolution: a non-coroutine
+            # handler is invoked inline on the event loop, mirroring the
+            # TypeScript microtask dispatch. It runs to completion within this
+            # event-loop step, so the attempt timer cannot preempt it — a
+            # synchronous handler is timeout-exempt by construction in both
+            # runtimes. The former `asyncio.to_thread` offload, which raced the
+            # wall clock and could write a load-induced in-doubt activity, is
+            # retired; a handler that needs timeout eligibility must be a
+            # coroutine function or return an awaitable.
+            if self.cancellation.cancelled:
+                return _Invocation(cancelled=True)
+            try:
+                value = handler(context)
+            except asyncio.CancelledError as exc:
+                return _Invocation(error=exc, cancelled=self.cancellation.cancelled)
+            except BaseException as exc:
+                return _Invocation(error=exc)
+            if not inspect.isawaitable(value):
+                return _Invocation(value=value)
+            # Only the returned awaitable is asynchronous work; it remains
+            # timeout-eligible exactly like a coroutine handler.
+            return await self._race_settlement(
+                asyncio.ensure_future(cast(Awaitable[object], value)),
+                context,
+                binding,
+            )
 
-        task = asyncio.create_task(call())
+        async def call() -> object:
+            return await cast(Callable[[CycleActivityContext], Awaitable[object]], handler)(
+                context
+            )
+
+        return await self._race_settlement(asyncio.create_task(call()), context, binding)
+
+    async def _race_settlement(
+        self,
+        task: asyncio.Task[object],
+        context: CycleActivityContext,
+        binding: CycleActivityBinding,
+    ) -> _Invocation:
         cancel_task = asyncio.create_task(self.cancellation.wait())
         now = self.journal.timestamp()
         remaining_ms = max(

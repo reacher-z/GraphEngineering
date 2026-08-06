@@ -13,6 +13,12 @@ const GRAPH_SCHEMA_PATH = join(specRoot, "graph.schema.json");
 
 const CONTRACT = "runtime-capability/v1alpha1";
 const CODE = "UNSUPPORTED_RUNTIME_CAPABILITY";
+// Ownership is the exact apiVersion and nothing else: a barrier config that
+// claims IntegratedBarrierPolicy is refused under its own capability name by
+// every entry point that does not implement barrier satisfaction, while every
+// other unsupported config keeps the published `node-config:barrier` name.
+const INTEGRATED_BARRIER_API_VERSION = "graphengineering.reacher-z.github.io/barrier/v1alpha1";
+const INTEGRATED_BARRIER_CAPABILITY = "integrated-barrier-policy";
 const SUPPORTED_KINDS = new Set(["agent", "model", "tool", "transform", "router", "barrier"]);
 const SUPPORTED_POLICIES = new Set([
   "maxConcurrency",
@@ -55,10 +61,15 @@ function expectedFailures(graph) {
       result.push(failure(node.id, `node-kind:${node.kind}`, `${base}/kind`));
     }
     if (node.kind === "barrier") {
+      const claimed = typeof node.config === "object" && node.config !== null &&
+        !Array.isArray(node.config) &&
+        node.config.apiVersion === INTEGRATED_BARRIER_API_VERSION;
       const keys = Object.keys(node.config);
       const supported = keys.length === 0 ||
         (keys.length === 1 && keys[0] === "condition" && node.config.condition === "all");
-      if (!supported) {
+      if (claimed) {
+        result.push(failure(node.id, INTEGRATED_BARRIER_CAPABILITY, `${base}/config`));
+      } else if (!supported) {
         result.push(failure(node.id, "node-config:barrier", `${base}/config`));
       }
     }

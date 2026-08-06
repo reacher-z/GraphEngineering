@@ -34,6 +34,7 @@ from .flow import ALGORITHM, FlowDecision, evaluate_flow
 from .guard import (
     GuardFailed,
     GuardOutcome,
+    GuardPayloadField,
     GuardPrepared,
     GuardSuppressed,
     OccurrenceContext,
@@ -114,6 +115,7 @@ __all__ = [
     "FlowDecision",
     "GuardFailed",
     "GuardOutcome",
+    "GuardPayloadField",
     "GuardPhase",
     "GuardPrepared",
     "GuardSuppressed",

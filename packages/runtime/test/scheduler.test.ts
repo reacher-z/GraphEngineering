@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { GraphSpec, NodeSpec } from "@graph-engineering/core";
+import {
+  claimsIntegratedBarrierPolicy,
+  type GraphSpec,
+  type NodeSpec,
+} from "@graph-engineering/core";
 import { describe, expect, it, vi } from "vitest";
 import { runGraph, type NodeExecutor } from "../src/index.js";
 import {
@@ -151,6 +155,28 @@ describe("runGraph", () => {
         {},
         { nodeExecutors, journal },
       );
+
+      const claimed = testCase.graph.nodes.some((current) =>
+        current.kind === "barrier" && claimsIntegratedBarrierPolicy(current.config));
+      if (claimed) {
+        // The corpus refusal belongs to the entry points that do not implement
+        // barrier satisfaction; the durable suite consumes it literally. The
+        // ordinary scheduler executes the integrated barrier itself with zero
+        // executor attempts, so it must not report the capability failure.
+        expect(testCase.expect.supported, testCase.name).toBe(false);
+        expect(
+          result.failures.map((failure) => failure.code),
+          testCase.name,
+        ).not.toContain("UNSUPPORTED_RUNTIME_CAPABILITY");
+        expect(result.status, `${testCase.name}: ${JSON.stringify(result)}`).toBe("succeeded");
+        for (const current of testCase.graph.nodes) {
+          if (current.kind !== "barrier") continue;
+          const settled = result.nodes.find((item) => item.nodeId === current.id);
+          expect(settled?.attempts, `${testCase.name}: ${current.id}`).toBe(0);
+        }
+        expect(result.decisionEvents?.length ?? 0, testCase.name).toBeGreaterThan(0);
+        continue;
+      }
 
       if (testCase.expect.supported) {
         expect(result.status, `${testCase.name}: ${JSON.stringify(result)}`).toBe("succeeded");

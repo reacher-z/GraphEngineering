@@ -5,7 +5,7 @@ import copy
 import hashlib
 import json
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Awaitable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -85,23 +85,23 @@ def fixed_clock() -> str:
     return "2026-07-26T00:00:00Z"
 
 
-# Every handler this module actually dispatches is a coroutine function.
+# Handler dispatch semantics pinned by this module
+# (D8-CYCLE-TIMEOUT-DIVERGENCE-090, resolved):
 #
-# Attempt `timeoutMs` is the one bound in the cycle contract that is not driven
-# by the injected trusted clock — `deadlineAt`, `durationMs` and `maxDurationMs`
-# all read the frozen clock — and Python dispatches a non-coroutine handler
-# through `asyncio.to_thread`, so it must cross the default thread pool and
-# re-acquire the GIL before its result reaches the event loop. That crossing
-# genuinely races the 100 ms wall-clock `timeoutMs` every binding in the shared
-# request carries: under host load the same handlers went from a dispatch p99 of
-# 0.86 ms to a 661 ms maximum. A load-induced timeout aborts the attempt, aborts
-# the round, and the event carrying the assertion target is never constructed.
+# A non-coroutine handler is invoked inline on the event loop — the former
+# `asyncio.to_thread` offload is retired — so it runs to completion within the
+# event-loop step that dispatched it and the attempt timer can never preempt
+# it. A synchronous handler is therefore timeout-exempt by construction, at
+# any load and at any `timeoutMs`, exactly like TypeScript's microtask
+# dispatch. This makes synchronous-handler tests load-immune by design.
 #
-# A coroutine handler settles in its first event-loop step, so the timer cannot
-# preempt it. See spec/cycle-semantics.md, "Registered divergence: attempt
-# timeout is the one non-deterministic bound" (D8-CYCLE-TIMEOUT-DIVERGENCE-090),
-# which makes this normative for any campaign not exercising attempt timeout.
-# The two tests that *do* exercise attempt timeout are marked in place.
+# Attempt `timeoutMs` remains the one bound not driven by the injected trusted
+# clock, and it is reachable only through asynchronous suspension: a coroutine
+# handler (or a returned awaitable) that blocks on an awaited primitive. See
+# spec/cycle-semantics.md, "Resolution: synchronous handlers execute inline
+# and are timeout-exempt". The tests that exercise attempt timeout use a
+# coroutine blocking on an awaited primitive that is never set, so the timeout
+# is certain in both directions.
 async def no_candidates(_: object) -> list[object]:
     """Coroutine finder/evaluator whose output is deliberately empty."""
 
@@ -1219,41 +1219,201 @@ def test_resume_open_activity_honors_idempotency_and_in_doubt(side_effects: str)
     asyncio.run(run())
 
 
-def test_late_noncooperative_handler_is_charged_but_never_committed() -> None:
-    """`late` is deliberately synchronous and deliberately non-cooperative.
+def _busy_checksum(iterations: int = 1_000_000) -> tuple[int, float]:
+    """Deterministic bounded arithmetic busy work; returns (checksum, elapsed ms).
 
-    This is the one shape the divergence in spec/cycle-semantics.md says Python
-    has and TypeScript cannot express: a handler that blocks without ever
-    yielding, is timed out anyway, is charged for the attempt, and whose late
-    value is never committed. Making `late` a coroutine, or replacing the
-    blocking `time.sleep` with an awaited primitive, would retire that guarantee
-    rather than stabilise it, so it stays as written. The 30 ms block against a
-    1 ms `timeoutMs` is a 30x margin in the direction the test needs.
+    No wall-clock sleeps: load can only make the loop slower, which is the
+    direction every assertion built on it needs.
+    """
+
+    begin = time.perf_counter()
+    acc = 0
+    for index in range(iterations):
+        acc = (acc * 31 + index) % 1_000_003
+    return acc, (time.perf_counter() - begin) * 1000
+
+
+def _reject_all(context: object) -> list[dict[str, str]]:
+    """Synchronous evaluator covering every fresh key with a reject verdict."""
+
+    candidates = cast(
+        list[dict[str, Any]],
+        cast(dict[str, Any], cast(Any, context).input)["candidates"],
+    )
+    return [{"key": candidate["key"], "verdict": "reject"} for candidate in candidates]
+
+
+def test_sync_handler_exceeding_timeout_still_commits_inline() -> None:
+    """A synchronous handler is timeout-exempt by construction.
+
+    This retires the pre-resolution expectation pinned here by
+    `test_late_noncooperative_handler_is_charged_but_never_committed`: a
+    blocking synchronous handler being timed out through `asyncio.to_thread`,
+    charged, and never committed. Under the D8-CYCLE-TIMEOUT-DIVERGENCE-090
+    resolution the same handler runs inline on the event loop, so the 1 ms
+    `timeoutMs` can never fire against it and its discovery commits, exactly
+    as in TypeScript. Load-immune by design: the busy loop only gets slower
+    under load, and slower cannot make an inline handler time out.
     """
 
     async def run() -> None:
-        request = request_document(max_iterations=3)
+        request = request_document(max_iterations=1)
         request["activities"]["finder"]["timeoutMs"] = 1
         request["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.5
+        elapsed_ms = 0.0
 
-        def late(_: object) -> list[dict[str, object]]:
-            time.sleep(0.03)
-            return [{"key": "late", "value": None}]
+        def busy(_: object) -> list[dict[str, object]]:
+            nonlocal elapsed_ms
+            checksum, elapsed_ms = _busy_checksum()
+            return [{"key": f"busy-{checksum}", "value": {"checksum": checksum}}]
 
         result = await start_cycle(
             request,
-            CycleHandlers(finder=late, candidate_evaluator=no_candidates),
+            CycleHandlers(finder=busy, candidate_evaluator=_reject_all),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        assert elapsed_ms > 1, "busy work must exceed the 1 ms timeoutMs"
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert result.result["seenCount"] == 1
+        assert any(event.type == "DiscoveryCommitted" for event in result.events)
+        assert not any(event.type == "ActivityFailed" for event in result.events)
+
+    asyncio.run(run())
+
+
+def test_sync_idempotent_handler_cannot_reach_the_in_doubt_path() -> None:
+    """No load-induced in-doubt activity is reachable for a sync handler.
+
+    Pre-resolution, an `idempotent` binding whose synchronous handler lost the
+    `to_thread` race wrote an in-doubt activity into the durable stream purely
+    from machine load. Inline dispatch makes that path unreachable: the timer
+    cannot observe the attempt until the handler has already returned.
+    """
+
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        finder_binding = request["activities"]["finder"]
+        finder_binding["sideEffects"] = "idempotent"
+        finder_binding["timeoutMs"] = 1
+        store = MemoryCycleStore()
+
+        def busy(_: object) -> list[dict[str, object]]:
+            checksum, _elapsed = _busy_checksum()
+            return [{"key": f"busy-{checksum}", "value": {"checksum": checksum}}]
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=busy, candidate_evaluator=_reject_all),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert not any(event.type == "ActivityFailed" for event in result.events)
+        assert replayed.state["inDoubtActivities"] == []
+
+    asyncio.run(run())
+
+
+def test_sync_handler_returning_awaitable_stays_timeout_eligible() -> None:
+    """Only the synchronous prefix of a handler is timeout-exempt.
+
+    A non-coroutine handler that returns an awaitable hands asynchronous work
+    back to the event loop, and that awaitable is raced against `timeoutMs`
+    exactly like a coroutine handler. Attempt timeout therefore remains
+    reachable — but only through a deliberate awaited block, never through
+    scheduling delay. The awaited primitive is never set, so the timeout is
+    certain in both directions.
+    """
+
+    async def run() -> None:
+        request = request_document(max_iterations=2)
+        request["activities"]["finder"]["timeoutMs"] = 1
+        request["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.25
+
+        def blocking_awaitable(_: object) -> Awaitable[list[object]]:
+            async def never() -> list[object]:
+                await asyncio.Event().wait()
+                return []
+
+            return never()
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=blocking_awaitable, candidate_evaluator=no_candidates),
             store=MemoryCycleStore(),
             lease=lease(),
             clock=fixed_clock,
         )
 
         assert result.result["exitReason"] == "FAILED"
-        assert result.result["costUsd"] == 0.5
-        assert result.result["seenCount"] == 0
-        assert not any(event.type == "DiscoveryCommitted" for event in result.events)
+        failures = [event for event in result.events if event.type == "ActivityFailed"]
+        assert failures
+        assert all(
+            event.data["failure"]["code"] == "GE_CYCLE_ACTIVITY_TIMEOUT"
+            for event in failures
+        )
 
     asyncio.run(run())
+
+
+def test_sync_handler_raise_is_classified_like_an_async_raise() -> None:
+    """Inline dispatch adds no new failure class.
+
+    A synchronous raise must produce the same ActivityFailed envelope as the
+    same exception raised from a coroutine handler — mirroring TypeScript,
+    where a synchronous throw and an asynchronous rejection travel the
+    identical `Promise` path.
+    """
+
+    async def run() -> tuple[Any, Any]:
+        def sync_boom(_: object) -> list[object]:
+            raise CycleRuntimeError(
+                CycleErrorCode.ACTIVITY_FAILED,
+                "ambiguous idempotent provider result",
+            )
+
+        async def async_boom(_: object) -> list[object]:
+            raise CycleRuntimeError(
+                CycleErrorCode.ACTIVITY_FAILED,
+                "ambiguous idempotent provider result",
+            )
+
+        results = []
+        for handler in (sync_boom, async_boom):
+            request = request_document(max_iterations=1)
+            request["activities"]["finder"]["sideEffects"] = "idempotent"
+            request["activities"]["finder"]["maxAttemptsPerRound"] = 1
+            result = await start_cycle(
+                request,
+                CycleHandlers(finder=handler, candidate_evaluator=no_candidates),
+                store=MemoryCycleStore(),
+                lease=lease(),
+                clock=fixed_clock,
+            )
+            results.append(result)
+        return results[0], results[1]
+
+    sync_result, async_result = asyncio.run(run())
+    sync_failures = [
+        event.data["failure"]
+        for event in sync_result.events
+        if event.type == "ActivityFailed"
+    ]
+    async_failures = [
+        event.data["failure"]
+        for event in async_result.events
+        if event.type == "ActivityFailed"
+    ]
+    assert sync_failures == async_failures
+    assert len(sync_failures) == 1
+    assert sync_failures[0]["code"] == CycleErrorCode.ACTIVITY_FAILED.value
+    assert sync_result.result["exitReason"] == async_result.result["exitReason"]
 
 
 def test_invalid_patch_output_records_failure_without_revision_or_extra_round() -> None:

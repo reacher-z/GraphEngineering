@@ -4,6 +4,7 @@ export type PersistenceErrorCode =
   | "VERSION_CONFLICT"
   | "CORRUPT_EVENT_LOG"
   | "CORRUPT_CHECKPOINT"
+  | "CHECKPOINT_PROTECTION_REQUIRED"
   | "PERSISTENCE_IO";
 
 export interface SerializedPersistenceError {

@@ -114,6 +114,12 @@ export interface SchedulerNodeSettledWithoutAttempt {
   result: NodeRunResult;
 }
 
+export interface SchedulerDecisionCommitted {
+  graph: GraphSpec;
+  node: NodeSpec;
+  event: DecisionEvent;
+}
+
 export interface SchedulerRunResult extends GraphRunResult {
   scheduledOrder: readonly string[];
   completionOrder: readonly string[];
@@ -124,6 +130,15 @@ export interface SchedulerJournal {
   attemptFailed(context: SchedulerAttemptFailed): Promise<void>;
   nodeSucceeded(context: SchedulerNodeSucceeded): Promise<void>;
   nodeSettledWithoutAttempt(context: SchedulerNodeSettledWithoutAttempt): Promise<void>;
+  /**
+   * One committed durable decision, delivered at the commit point inside the
+   * scheduler and awaited BEFORE the deciding node settles — and therefore
+   * before any downstream node that consumes the decision's bound output is
+   * dispatched. This is the same before-effect discipline as `beforeAttempt`:
+   * a journal that cannot durably record the decision must throw here, and the
+   * effect never happens.
+   */
+  decisionCommitted?(context: SchedulerDecisionCommitted): Promise<void>;
   runTerminal(result: SchedulerRunResult): Promise<void>;
 }
 
@@ -1256,13 +1271,22 @@ export async function runGraphWithJournal(
         .filter((edge) => !results.has(edge.from.node))
         .map((edge) => edge.from.node),
     );
-    decisionEvents.push({
+    const commitDecision = async (event: DecisionEvent): Promise<void> => {
+      decisionEvents.push(event);
+      // Before-effect: the durable journal records the decision before the
+      // barrier settles, so no downstream dispatch can precede the record. A
+      // journal failure here aborts the run with the decision unsettled.
+      if (options.journal?.decisionCommitted !== undefined && journalEnabled) {
+        await options.journal.decisionCommitted({ graph, node, event });
+      }
+    };
+    await commitDecision({
       type: "BarrierSatisfied",
       nodeId: binding.nodeId,
       data: document as unknown as JsonValue,
     });
     if (document.resolution === "awaiting_human") {
-      decisionEvents.push({
+      await commitDecision({
         type: "HumanInputRequested",
         nodeId: binding.nodeId,
         data: document as unknown as JsonValue,

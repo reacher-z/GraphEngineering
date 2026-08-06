@@ -65,4 +65,14 @@ export {
   type ProtectedEventPayload,
   type ProtectedEventSpec,
 } from "./protected-event-writer.js";
+export {
+  assertCheckpointProtection,
+  CheckpointProtectionRequiredError,
+  GuardedFileCheckpointStore,
+  ProtectedCheckpointWriter,
+  type CheckpointProtection,
+  type GuardedFileCheckpointStoreOptions,
+  type ProtectedCheckpointV1Alpha2,
+  type ProtectedCheckpointWriterOptions,
+} from "./protected-checkpoint-store.js";
 export * from "./redaction/index.js";

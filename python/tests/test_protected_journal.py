@@ -500,3 +500,47 @@ def test_a_settled_without_attempt_sentinel_failure_code_is_rejected() -> None:
     assert validate_protected_event(document("ROUTE_NOT_SELECTED")) is None
     for code in ("SETTLED_WITHOUT_FAILURE", "NODE_EXECUTION_FAILED"):
         assert validate_protected_event(document(code)) is not None, code
+
+
+def test_barrier_satisfied_pins_the_protected_ref_disposition() -> None:
+    """The `BarrierSatisfied` disposition mirror of `events-v1alpha2.ts`.
+
+    The decision document is authoritative content, so the type pins exactly
+    `protected-ref`; a `metadata-only` claim is refused before disk.
+    """
+
+    from graph_engineering.persistence.protected_journal import (
+        EVENT_DISPOSITIONS,
+        event_disposition,
+    )
+
+    assert EVENT_DISPOSITIONS["BarrierSatisfied"] == frozenset({"protected-ref"})
+    assert event_disposition("BarrierSatisfied", has_payload=True) == "protected-ref"
+
+    def document(disposition: str) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "decisionRef": {"apiVersion": "x"},
+            "decisionMac": "c" * 64,
+            "policyHash": "d" * 64,
+            "decisionId": "e" * 64,
+            "satisfied": True,
+            "resolution": "satisfied",
+        }
+        return {
+            "apiVersion": EVENT_V1ALPHA2_API_VERSION,
+            "eventId": "e3",
+            "type": "BarrierSatisfied",
+            "timestamp": "2026-07-26T12:00:00.000Z",
+            "runId": "r1",
+            "graphRevision": 1,
+            "sequence": 5,
+            "nodeId": "gate",
+            "payloadHash": canonical_sha256(data),
+            "capturePolicyHash": "b" * 64,
+            "redacted": False,
+            "payloadDisposition": disposition,
+            "data": data,
+        }
+
+    assert validate_protected_event(document("protected-ref")) is None
+    assert validate_protected_event(document("metadata-only")) is not None

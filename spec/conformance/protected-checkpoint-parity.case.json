@@ -1,0 +1,178 @@
+{
+  "title": "Guarded checkpoints/v1alpha2 cross-language byte-parity vector",
+  "description": "Both native lanes must reproduce expect.record byte-for-byte (canonical JSON, sorted keys, UTF-8) when the guarded checkpoint writer protects input under the deterministic test key provider, the pinned default stable capture policy, and the pinned authority scope. expect.canonicalSha256 is SHA-256 of the canonical record bytes without the trailing newline. Emitted and asserted by packages/persistence/test/protected-checkpoint.test.ts and python/tests/test_protected_checkpoint.py. Not yet wired into tools/conformance/run.mjs; the integrator owns the join.",
+  "keyProvider": {
+    "kind": "deterministic-test",
+    "keyRef": "test-key-provider/deterministic/v1alpha1"
+  },
+  "scope": {
+    "tenantScopeId": "tenant-opaque-1",
+    "authorityProviderId": "provider-opaque-1",
+    "authoritySubjectId": "subject-opaque-1"
+  },
+  "policy": {
+    "base": "default-stable-profile",
+    "transformImplementationHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "ruleRegistryVersion": 1,
+    "ruleRegistryHash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "keyRef": "test-key-provider/deterministic/v1alpha1",
+    "capturePolicyHash": "14f82789d0d695bbf03a9f7fbe45b9e11c66adf296145a55e5ecf3bd34745a4e"
+  },
+  "input": {
+    "decisionId": "decision-parity-checkpoint-1",
+    "runId": "parity-run-1",
+    "checkpointId": "ckpt-000001",
+    "sequence": 5,
+    "createdAt": "2026-08-01T00:00:00Z",
+    "graphRevision": 1,
+    "graphHash": "abababababababababababababababababababababababababababababababab",
+    "implementationHash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "historyPrefixHash": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "totalAttempts": 3,
+    "graphInput": {
+      "question": "What is the plan?",
+      "threshold": 42
+    },
+    "nodes": [
+      {
+        "nodeId": "planner",
+        "status": "succeeded",
+        "attempts": 1,
+        "input": {
+          "prompt": "plan"
+        },
+        "output": {
+          "steps": [
+            "a",
+            "b"
+          ]
+        },
+        "activityKey": "1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      {
+        "nodeId": "worker",
+        "status": "running",
+        "attempts": 1,
+        "input": {
+          "task": "b"
+        },
+        "activityKey": "3434343434343434343434343434343434343434343434343434343434343434",
+        "openAttempt": 1
+      },
+      {
+        "nodeId": "reviewer",
+        "status": "pending"
+      },
+      {
+        "nodeId": "fallback",
+        "status": "skipped",
+        "attempts": 0,
+        "result": {
+          "code": "UPSTREAM_FAILED"
+        },
+        "failureCode": "UPSTREAM_FAILED"
+      }
+    ]
+  },
+  "expect": {
+    "protectedRefCount": 5,
+    "contentHash": "3476706ec7156fe93f7bdfb25ba3e00c8c92ab04195280fa88291d0ff5f65d5c",
+    "canonicalSha256": "5ec613d44942fa73f9b27995ee827f2174d387d3ffc8e0206f670a24ff136c8b",
+    "record": {
+      "apiVersion": "graphengineering.reacher-z.github.io/checkpoints/v1alpha2",
+      "capturePolicyHash": "14f82789d0d695bbf03a9f7fbe45b9e11c66adf296145a55e5ecf3bd34745a4e",
+      "checkpointId": "ckpt-000001",
+      "contentHash": "3476706ec7156fe93f7bdfb25ba3e00c8c92ab04195280fa88291d0ff5f65d5c",
+      "createdAt": "2026-08-01T00:00:00Z",
+      "graphHash": "abababababababababababababababababababababababababababababababab",
+      "graphInputMac": "3b63c552ac2b31097775aebe40737e1cf800ddea51f7675922e60d9a58761eef",
+      "graphInputRef": {
+        "aadHash": "57c3bc68a107b8b7c89e7d2ac64fe32915f98bdc025c193ea2ad806dba18622b",
+        "apiVersion": "graphengineering.reacher-z.github.io/protected-value/v1alpha1",
+        "ciphertextHash": "b893b76e7c508901ced6b3d03c6e8b2098113b77a8532b3b5666a0890a1d4ce3",
+        "codec": "durable-json/v1alpha1",
+        "keyRefHash": "c04d0abfcb3aa0cb7c74e6134d9f0eb525f9f0e0e405fa70e0c8401395625956",
+        "ref": "pv_b62778a0343f47280ccb0521ec",
+        "valueMac": "3b63c552ac2b31097775aebe40737e1cf800ddea51f7675922e60d9a58761eef"
+      },
+      "graphRevision": 1,
+      "historyPrefixHash": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "implementationHash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "keyRefHash": "c04d0abfcb3aa0cb7c74e6134d9f0eb525f9f0e0e405fa70e0c8401395625956",
+      "nodes": [
+        {
+          "activityKey": "1212121212121212121212121212121212121212121212121212121212121212",
+          "attempts": 1,
+          "inputMac": "48182cea07e4b490cfedec401add5eba1d30b7158509c9fb981dc2a5cd7b319e",
+          "inputRef": {
+            "aadHash": "2a8236ff892edb7770024cc172c99eeea2661bcbcaed8e7b9b327cd281b983fa",
+            "apiVersion": "graphengineering.reacher-z.github.io/protected-value/v1alpha1",
+            "ciphertextHash": "7ac92fd2ea0358d0d901080329c93d5bac657a9c60c8faf2f7a0be12cfaf7fea",
+            "codec": "durable-json/v1alpha1",
+            "keyRefHash": "c04d0abfcb3aa0cb7c74e6134d9f0eb525f9f0e0e405fa70e0c8401395625956",
+            "ref": "pv_86b82a7c4216c4bed72fca190a",
+            "valueMac": "48182cea07e4b490cfedec401add5eba1d30b7158509c9fb981dc2a5cd7b319e"
+          },
+          "nodeId": "planner",
+          "outputMac": "d870c4a48cea452fee2132869c88a9be9299503ce868b8c8ee417810479d32ab",
+          "outputRef": {
+            "aadHash": "2ad24c5e56d4206f60b541e9513f7446f255b4f5bc008628082efda86663c80a",
+            "apiVersion": "graphengineering.reacher-z.github.io/protected-value/v1alpha1",
+            "ciphertextHash": "8b57600ac30e9db6ddcbebb2a003194443b5bc8801edc3ed4a8abc401aa167d0",
+            "codec": "durable-json/v1alpha1",
+            "keyRefHash": "c04d0abfcb3aa0cb7c74e6134d9f0eb525f9f0e0e405fa70e0c8401395625956",
+            "ref": "pv_1389b92747a3b1cdcacfbaf191",
+            "valueMac": "d870c4a48cea452fee2132869c88a9be9299503ce868b8c8ee417810479d32ab"
+          },
+          "status": "succeeded"
+        },
+        {
+          "activityKey": "3434343434343434343434343434343434343434343434343434343434343434",
+          "attempts": 1,
+          "inputMac": "a2130bfe45d1cef137ee6e670a3fe50951fc7f99cee9fd06c2a2db0378415b0d",
+          "inputRef": {
+            "aadHash": "903c54cac59ac6b117932f30ca043c012eb80bc844225a9874eeb45964048843",
+            "apiVersion": "graphengineering.reacher-z.github.io/protected-value/v1alpha1",
+            "ciphertextHash": "00349d9e3de66128880a8a78c4adf7657647e0589ebe81391187f72971917719",
+            "codec": "durable-json/v1alpha1",
+            "keyRefHash": "c04d0abfcb3aa0cb7c74e6134d9f0eb525f9f0e0e405fa70e0c8401395625956",
+            "ref": "pv_0eb30366bfe328e35d62195ba5",
+            "valueMac": "a2130bfe45d1cef137ee6e670a3fe50951fc7f99cee9fd06c2a2db0378415b0d"
+          },
+          "nodeId": "worker",
+          "openAttempt": 1,
+          "status": "running"
+        },
+        {
+          "attempts": 0,
+          "nodeId": "reviewer",
+          "status": "pending"
+        },
+        {
+          "attempts": 0,
+          "failureCode": "UPSTREAM_FAILED",
+          "nodeId": "fallback",
+          "resultMac": "c3d8dc554352aadf05f6d157ef0d6d4ca74d006081085c9fa267b62c24fcfe5a",
+          "resultRef": {
+            "aadHash": "7da95bab2bf798932fd3af07e14699999ff340e356462450bff3256fb794f798",
+            "apiVersion": "graphengineering.reacher-z.github.io/protected-value/v1alpha1",
+            "ciphertextHash": "3513e63285a65d88aec0e38d22d2fb465bb090e719d019a17dcabeb1aafa86ee",
+            "codec": "durable-json/v1alpha1",
+            "keyRefHash": "c04d0abfcb3aa0cb7c74e6134d9f0eb525f9f0e0e405fa70e0c8401395625956",
+            "ref": "pv_c5df066e65727ed7f3d5a5c535",
+            "valueMac": "c3d8dc554352aadf05f6d157ef0d6d4ca74d006081085c9fa267b62c24fcfe5a"
+          },
+          "status": "skipped"
+        }
+      ],
+      "payloadDisposition": "protected-ref",
+      "projectionType": "scheduler-projection/v1alpha2",
+      "protectedRefCount": 5,
+      "protectedStoreContract": "protected-payload-store/v1alpha1",
+      "redacted": false,
+      "runId": "parity-run-1",
+      "sequence": 5,
+      "totalAttempts": 3
+    }
+  }
+}

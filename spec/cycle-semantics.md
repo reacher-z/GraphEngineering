@@ -1279,6 +1279,60 @@ record hashes, result and checkpoint projections, activity paths, failure and
 settlement facts, in-doubt state, replay, and terminal resume behavior. This is
 the H03A activity-phase campaign.
 
+#### Resolution: synchronous handlers execute inline and are timeout-exempt
+
+This subsection resolves the divergence registered above as
+`D8-CYCLE-TIMEOUT-DIVERGENCE-090`. The registration text is preserved
+unchanged as history; where the two conflict, this resolution is normative.
+
+The contract adopts the inline-dispatch alignment: Python was changed to match
+TypeScript, deliberately retiring Python's stronger blocking-handler
+guarantee. As of this revision:
+
+1. **A synchronous (non-coroutine, non-promise-returning) handler executes
+   inline in both languages.** TypeScript invokes the handler through
+   `Promise.resolve().then(...)` on the microtask queue; Python invokes a
+   non-coroutine handler directly on the event loop with no thread offload.
+   In both runtimes the handler runs to completion within the event-loop step
+   that dispatched it.
+2. **A synchronous handler is therefore timeout-exempt in both languages, by
+   construction.** The attempt timer is a macrotask (TypeScript) or a timed
+   `asyncio.wait` (Python) and neither can preempt code that never yields the
+   loop. This holds at any machine load and at any `timeoutMs`, which is
+   exactly what makes the behavior deterministic: identical inputs produce
+   identical durable histories regardless of scheduling latency, and no
+   load-induced timeout can write an in-doubt activity for a synchronous
+   handler in either runtime.
+3. **A handler that needs attempt-timeout eligibility must be asynchronous** —
+   a coroutine function in Python (or a synchronous callable returning an
+   awaitable, whose awaitable portion alone is raced against the timer) and a
+   promise-returning handler in TypeScript. `timeoutMs` bounds asynchronous
+   suspension, not CPU occupancy of the dispatching loop; bounding a
+   CPU-blocking handler is the host's responsibility, not this contract's.
+4. **The former Python behavior — dispatching a non-coroutine handler through
+   `asyncio.to_thread` — and the guarantee it carried are retired as of this
+   revision.** Python could previously time out a blocking synchronous
+   handler, charge the attempt, and never commit its late value; TypeScript
+   cannot express that guarantee, and it was purchased with the
+   non-determinism this section registers. No conforming implementation may
+   reintroduce a thread or scheduling hop between claim and synchronous
+   handler invocation.
+
+Consequences for the interim normative rules above: rule 1 (campaigns must not
+use synchronous handlers) is retired — a synchronous handler is now
+deterministic in both runtimes and campaigns may use one deliberately, as the
+retained sync-timeout-exemption conformance case does with a bounded
+arithmetic busy loop exceeding `timeoutMs`. Rule 2 remains normative: a
+campaign that deliberately exercises attempt timeout MUST make the handler
+block on an awaited primitive. Rule 3 is superseded: what was previously an
+artifact of TypeScript's microtask ordering is now the specified behavior of
+both runtimes. A synchronous raise is classified exactly like an asynchronous
+rejection in the same runtime; inline dispatch does not add a new failure
+class. Cancellation precedence is unchanged: cancellation observed before
+dispatch prevents the handler from starting, and a synchronous value that
+races or follows cancellation or a hard boundary is still charged and never
+committed.
+
 #### Public-operation interruption lattice
 
 The retained

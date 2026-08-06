@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { canonicalHash, type GraphSpec, type NodeSpec } from "@graph-engineering/core";
+import {
+  canonicalHash,
+  claimsIntegratedBarrierPolicy,
+  type GraphSpec,
+  type NodeSpec,
+} from "@graph-engineering/core";
 import { MemoryProtectedEventStore } from "@graph-engineering/persistence";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -137,7 +142,9 @@ describe("durable graph scheduler", () => {
             .map((current) => [current.id, executor]),
         );
 
-        if (testCase.expect.supported) {
+        const claimed = testCase.graph.nodes.some((current) =>
+          current.kind === "barrier" && claimsIntegratedBarrierPolicy(current.config));
+        if (testCase.expect.supported || claimed) {
           const store = memoryProtection();
           const options = {
             runId: `capability-${entrypoint}`,
@@ -161,6 +168,25 @@ describe("durable graph scheduler", () => {
           expect(executor, `${testCase.name}:${entrypoint}`).toHaveBeenCalledTimes(
             entrypoint === "start" ? 1 : 0,
           );
+          if (claimed) {
+            // The corpus still pins the refusal literal, but no entry point in
+            // this repository refuses any longer: the durable scheduler now
+            // journals `BarrierSatisfied` and executes the integrated barrier
+            // with zero executor attempts, exactly like the ordinary one. The
+            // corpus literal is reconciled at the cross-language join.
+            expect(testCase.expect.supported, testCase.name).toBe(false);
+            for (const current of testCase.graph.nodes) {
+              if (current.kind !== "barrier") continue;
+              const settled = result.nodes.find((item) => item.nodeId === current.id);
+              expect(settled?.attempts, `${testCase.name}: ${current.id}`).toBe(0);
+            }
+            if (entrypoint === "start") {
+              expect(
+                result.decisionEvents?.map((event) => event.type),
+                testCase.name,
+              ).toEqual(["BarrierSatisfied"]);
+            }
+          }
           continue;
         }
 

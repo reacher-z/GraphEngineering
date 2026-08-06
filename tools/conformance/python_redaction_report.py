@@ -50,6 +50,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from dataclasses import replace
+
+from graph_engineering.durable_protection import diagnostic_evidence_authorized
 from graph_engineering.events import GraphEvent
 from graph_engineering.persistence import JsonlEventStore
 from graph_engineering.persistence.protected_journal import (
@@ -91,6 +94,7 @@ from graph_engineering.redaction.pointer import (
 from graph_engineering.redaction.policy import (
     RedactionRule,
     default_stable_profile,
+    policy_enabled_for,
 )
 from graph_engineering.redaction.protect import (
     FileProtectedPayloadStore,
@@ -174,7 +178,7 @@ CANARY_TRANSFORM_HASH = "11" * 32
 CANARY_REGISTRY_HASH = "22" * 32
 
 #: The corpus sections this report is required to decide in full.
-REQUIRED_SECTIONS = ("pointerCases", "wireCases", "flowCases")
+REQUIRED_SECTIONS = ("pointerCases", "wireCases", "flowCases", "policyEnablementCases")
 
 
 def load_corpus() -> dict[str, Any]:
@@ -378,6 +382,43 @@ def flow_report(case: Mapping[str, Any]) -> dict[str, Any]:
         "outcome": decision.outcome,
         "writeAuthorized": decision.write_authorized,
         "code": None if decision.failure is None else decision.failure.code,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Section 1.2 widening / Section 6.1 protected-evidence enablement.
+
+
+def enablement_report(case: Mapping[str, Any]) -> dict[str, Any]:
+    """Decide one policy-enablement case with the native predicates.
+
+    ``pairEnabled`` is ``policy_enabled_for`` — the Section 1.2 formula whose
+    explicit-widening test spans the union of the source row's control and the
+    sink row's controls.  ``evidenceAuthorized`` is
+    ``diagnostic_evidence_authorized`` — the stricter Section 6.1 gate that
+    additionally requires ``errors: "protected-evidence"`` itself.  The durable
+    scheduler's disposition rule follows the evidence: a captured payload means
+    ``protected-ref``, none means ``metadata-only``.
+    """
+
+    policy = default_stable_profile(
+        transform_implementation_hash=CANARY_TRANSFORM_HASH,
+        rule_registry_version=1,
+        rule_registry_hash=CANARY_REGISTRY_HASH,
+        key_ref="conformance-enablement-key",
+    )
+    overrides = {str(field): str(mode) for field, mode in case["policyOverrides"].items()}
+    unsupported = set(overrides) - {"errors", "events"}
+    if unsupported:
+        raise AssertionError(
+            f"policyEnablementCases: unsupported override fields {sorted(unsupported)}"
+        )
+    policy = replace(policy, **overrides)  # type: ignore[arg-type]
+    evidence = diagnostic_evidence_authorized(policy, str(case["sink"]))
+    return {
+        "pairEnabled": policy_enabled_for(policy, str(case["sourceClass"]), str(case["sink"])),
+        "evidenceAuthorized": evidence,
+        "nodeAttemptFailedDisposition": "protected-ref" if evidence else "metadata-only",
     }
 
 
@@ -676,19 +717,23 @@ def main() -> None:
     pointer_cases: list[dict[str, Any]] = corpus["pointerCases"]
     wire_cases: list[dict[str, Any]] = corpus["wireCases"]
     flow_cases: list[dict[str, Any]] = corpus["flowCases"]
+    enablement_cases: list[dict[str, Any]] = corpus["policyEnablementCases"]
 
     pointer_ids = case_ids(pointer_cases, "pointerCases")
     wire_ids = case_ids(wire_cases, "wireCases")
     flow_ids = case_ids(flow_cases, "flowCases")
+    enablement_ids = case_ids(enablement_cases, "policyEnablementCases")
 
     pointers = {str(case["id"]): pointer_report(case) for case in pointer_cases}
     wires = {str(case["id"]): wire_report(case) for case in wire_cases}
     flows = {str(case["id"]): flow_report(case) for case in flow_cases}
+    enablements = {str(case["id"]): enablement_report(case) for case in enablement_cases}
 
     for section, reported, declared in (
         ("pointerCases", pointers, pointer_ids),
         ("wireCases", wires, wire_ids),
         ("flowCases", flows, flow_ids),
+        ("policyEnablementCases", enablements, enablement_ids),
     ):
         if len(reported) != len(declared):
             raise AssertionError(
@@ -707,9 +752,11 @@ def main() -> None:
         "pointerCaseOrder": pointer_ids,
         "wireCaseOrder": wire_ids,
         "flowCaseOrder": flow_ids,
+        "policyEnablementCaseOrder": enablement_ids,
         "pointerCases": pointers,
         "wireCases": wires,
         "flowCases": flows,
+        "policyEnablementCases": enablements,
         "receipt": receipt_section(),
         "corpusReceiptFacts": corpus_receipt_facts(corpus),
         "canary": canary_section(),

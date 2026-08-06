@@ -89,6 +89,12 @@ EVENT_DISPOSITIONS: Final[dict[str, frozenset[PayloadDisposition]]] = {
     "NodeRetried": frozenset({"metadata-only"}),
     "NodeSucceeded": frozenset({"protected-ref"}),
     "EdgeEmitted": frozenset({"metadata-only"}),
+    # The decision document of a committed integrated-barrier decision is
+    # authoritative content and travels as a protected reference, exactly like a
+    # `NodeSucceeded` output. Mirrors `EVENT_TYPE_RULES.BarrierSatisfied` in
+    # `packages/persistence/src/events-v1alpha2.ts` and the `BarrierSatisfied`
+    # branch of `spec/event-v1alpha2.schema.json`.
+    "BarrierSatisfied": frozenset({"protected-ref"}),
     "RunCancelled": frozenset({"protected-ref"}),
     "RunFailed": frozenset({"protected-ref"}),
     "RunSucceeded": frozenset({"protected-ref"}),

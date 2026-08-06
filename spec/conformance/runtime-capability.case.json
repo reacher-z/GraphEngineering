@@ -159,6 +159,46 @@
       }
     },
     {
+      "name": "claimed-integrated-barrier-policy-fails-closed",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "capability-integrated-barrier", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["root"],
+        "outputs": {"result": {"node": "join"}},
+        "nodes": [
+          {"id": "root", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {
+            "id": "join",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+              "kind": "all",
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore"
+            }
+          }
+        ],
+        "edges": [
+          {"id": "root-join", "from": {"node": "root"}, "to": {"node": "join"}}
+        ]
+      },
+      "expect": {
+        "supported": false,
+        "failures": [
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "join",
+            "message": "Runtime capability 'integrated-barrier-policy' at '#/nodes/1/config' is not implemented by runtime-capability/v1alpha1"
+          }
+        ]
+      }
+    },
+    {
       "name": "node-execution-contracts-fail-closed",
       "graph": {
         "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",

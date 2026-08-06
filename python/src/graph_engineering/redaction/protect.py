@@ -478,6 +478,26 @@ def new_reference_id() -> str:
     return f"pv_{uuid.uuid4().hex}"
 
 
+def deterministic_reference_id(
+    identity_key: bytes,
+    *,
+    aad_hash: str,
+    ciphertext_hash: str,
+) -> str:
+    """The keyed reference derivation the TypeScript lane always uses.
+
+    ``pv_`` + HMAC-SHA-256(identityKey, canonicalTagged(["protected-ref/v1alpha1",
+    aadHash, ciphertextHash]))[:26].  It carries no filename, path, tenant, key
+    identifier, or application-derived text, and two lanes protecting the same
+    occurrence under the same keys derive the same opaque reference.
+    """
+
+    digest = _hmac_tagged(
+        identity_key, ["protected-ref/v1alpha1", aad_hash, ciphertext_hash]
+    )
+    return f"pv_{digest[:26]}"
+
+
 def protect_value(
     logical_value: object,
     *,

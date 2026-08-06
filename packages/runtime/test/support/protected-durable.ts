@@ -179,6 +179,22 @@ export function draftFromRecovered(
           value: decodeDurableJson(data.result),
         }],
       };
+    case "BarrierSatisfied":
+      return {
+        type: "BarrierSatisfied",
+        ...identity,
+        data: {
+          policyHash: data.policyHash,
+          decisionId: data.decisionId,
+          satisfied: data.satisfied,
+          resolution: data.resolution,
+        },
+        payloads: [{
+          field: "decisionRef",
+          semanticContext: { kind: "node-result", runId, graphRevision, nodeId },
+          value: decodeDurableJson(data.decision),
+        }],
+      };
     case "RunSucceeded":
     case "RunFailed":
     case "RunCancelled":

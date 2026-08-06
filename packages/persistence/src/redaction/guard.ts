@@ -46,8 +46,10 @@ import {
   PortableJsonError,
   snapshotPortableJson,
 } from "./portable.js";
+import { sinkRow, sourceRow } from "./inventory.js";
 import { decodePointer } from "./pointer.js";
 import {
+  DEFAULT_CAPTURE_POLICY,
   ruleForSink,
   validateCapturePolicy,
   type CapturePolicy,
@@ -144,6 +146,15 @@ export interface GuardRequest {
    */
   readonly payloadHashPath?: string;
   /**
+   * Optional RFC 6901 pointer at which the guard writes the Section 6.2 record
+   * content hash: SHA-256 of canonical UTF-8 JSON of the entire closed record
+   * with only this member omitted. It is guard-owned envelope finalization for
+   * the same reason `payloadHashPath` is — the hash must cover the placed
+   * protected references, which only exist after the guard's own transform, and
+   * a caller callback here would be an injection point.
+   */
+  readonly contentHashPath?: string;
+  /**
    * An observational derivative to transform under the sink's redaction rule.
    * Section 3.2 forbids mixing it with protected authoritative refs in one
    * record, so it is only accepted when `payloads` is empty.
@@ -172,13 +183,55 @@ export interface SinkGuardOptions {
 /**
  * Section 4.1/1.2: a control is "enabled" when its selected mode permits any
  * representation to reach the sink at all. `off`, `codes-only`, and the `deny`
- * pseudo-control are the only disabled modes in the closed vocabulary.
+ * pseudo-control are the only disabled modes in the closed vocabulary:
+ * codes-only means stable codes only, with no payload evidence in any form.
+ * Python's `graph_engineering.redaction.policy.control_enabled` is this exact
+ * predicate.
  */
 export function controlEnabled(policy: CapturePolicy, control: PolicyControl): boolean {
   if (control === "deny") return false;
   const mode = (policy as unknown as Record<string, unknown>)[control];
   if (typeof mode !== "string") return false;
   return mode !== "off" && mode !== "codes-only";
+}
+
+/**
+ * Section 1.2 `policyEnabled` for one classified pair.
+ *
+ * The source row's control and every control named by the sink row must be
+ * enabled, intersected with the Section 1.2 default matrix. A pair outside the
+ * default matrix (a sink row whose `defaultEnabled` is false, or a source row
+ * whose `defaultAction` is `off`) is enabled only when the effective policy
+ * explicitly widens it, and the widening formula is the union of the source
+ * row's `policyControl` and the sink row's `policyControls`: the pair is
+ * widened exactly when at least one control in that union selects a mode
+ * different from the Section 4.1 default stable profile.
+ *
+ * This is Python's `graph_engineering.redaction.policy.policy_enabled_for`
+ * verbatim, so both language lanes reach the same answer on the same input.
+ */
+export function policyEnabledFor(
+  policy: CapturePolicy,
+  sourceClass: CaptureSourceClass,
+  sink: CaptureSinkClass,
+): boolean {
+  const source = sourceRow(sourceClass);
+  const destination = sinkRow(sink);
+  if (source === undefined || destination === undefined) return false;
+  const mode = (candidate: CapturePolicy, control: PolicyControl): unknown =>
+    control === "deny" ? undefined : (candidate as unknown as Record<string, unknown>)[control];
+  const controlUnion: readonly PolicyControl[] = [
+    source.policyControl,
+    ...destination.policyControls,
+  ];
+  const widened = controlUnion.some(
+    (control) => mode(policy, control) !== mode(DEFAULT_CAPTURE_POLICY, control),
+  );
+  // Section 1.2 default matrix. A pair that is off by default stays off until
+  // the effective policy explicitly widens the union of its controls.
+  if ((!destination.defaultEnabled || source.defaultAction === "off") && !widened) return false;
+  if (!controlEnabled(policy, source.policyControl)) return false;
+  return destination.policyControls.every((control) => controlEnabled(policy, control));
 }
 
 function defineAtPointer(root: unknown, pointer: string, value: unknown): string | undefined {
@@ -560,6 +613,20 @@ export class SinkGuard {
       payloadHash = sha256Hex(canonicalJsonString(data ?? {}));
       if (request.payloadHashPath !== undefined) {
         const placed = defineAtPointer(finalRecord, request.payloadHashPath, payloadHash);
+        if (placed !== undefined) {
+          return this.#fail(request, {
+            code: "PAYLOAD_PROTECTION_FAILED",
+            phase: "canonicalize",
+            reason: placed,
+          });
+        }
+      }
+      if (request.contentHashPath !== undefined) {
+        // Section 6.2: the content hash covers the entire closed record —
+        // including the placed protected references and disposition facts —
+        // with only the content-hash member itself omitted.
+        const contentHash = sha256Hex(canonicalJsonString(finalRecord));
+        const placed = defineAtPointer(finalRecord, request.contentHashPath, contentHash);
         if (placed !== undefined) {
           return this.#fail(request, {
             code: "PAYLOAD_PROTECTION_FAILED",

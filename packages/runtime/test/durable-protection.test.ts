@@ -6,6 +6,8 @@ import {
   GRAPH_EVENT_API_VERSION,
   JsonlEventStore,
   MemoryEventStore,
+  controlEnabled,
+  policyEnabledFor,
   scanBytesForCanaries,
   type CanaryDetection,
   type GraphEvent,
@@ -15,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DurableRunError,
+  diagnosticEvidenceAuthorized,
   inspectLegacyDurableHistory,
   resumeDurableGraphRun,
   startDurableGraphRun,
@@ -325,12 +328,14 @@ describe("durable payload protection is mandatory (redaction-semantics.md 4.2)",
     expect(JSON.stringify(recoveredFailure)).not.toContain("pa55word");
   });
 
-  it("protects the raw text as evidence when the operator widens the sink", async () => {
-    // The same run under a policy that explicitly widens the event sink's
-    // control. Section 6.1: "explicit raw diagnostic evidence uses a protected
-    // ref and is never scheduler authority."
+  it("protects the raw text as evidence under errors: protected-evidence", async () => {
+    // The same run under a policy that explicitly selects the one lever the
+    // spec names. Section 6.1: "optional raw evidenceRef / evidenceMac only
+    // under explicit protected-evidence policy" — the `errors` control, the
+    // exception-message source row's control, must itself select
+    // `protected-evidence`.
     const protection = memoryProtection({
-      policy: { ...TEST_CAPTURE_POLICY, events: "allow-redacted" },
+      policy: { ...TEST_CAPTURE_POLICY, errors: "protected-evidence" },
     });
     const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 1 } })] });
     await startDurableGraphRun(retrying, {}, {
@@ -357,6 +362,94 @@ describe("durable payload protection is mandatory (redaction-semantics.md 4.2)",
     const recovered = await recoveredHistory(protection, "failure-evidence-widened");
     const recoveredFailure = recovered.find((event) => event.type === "NodeAttemptFailed");
     expect((recoveredFailure?.data.failure as { message: string }).message).toContain("pa55word");
+  });
+
+  it("captures no evidence under errors: codes-only, a disabled mode", async () => {
+    // Section 1.2/4.1: codes-only means stable codes only, with no payload
+    // evidence in any form, so the `errors` control is disabled and the record
+    // stays the metadata-only shape even though codes-only differs from the
+    // default profile's codes-and-sanitized-message.
+    const protection = memoryProtection({
+      policy: { ...TEST_CAPTURE_POLICY, errors: "codes-only" },
+    });
+    const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 1 } })] });
+    await startDurableGraphRun(retrying, {}, {
+      runId: "failure-evidence-codes-only",
+      implementationId: "v1",
+      protection,
+      nodeExecutors: {
+        root: () => {
+          throw new Error("connection to db://user:pa55word@host refused");
+        },
+      },
+    });
+    const persisted = await persistedHistory(protection, "failure-evidence-codes-only");
+    const failed = persisted.find((event) => event.type === "NodeAttemptFailed");
+    expect(failed?.payloadDisposition).toBe("metadata-only");
+    expect(Object.keys(failed?.data as object).sort()).toEqual(["failure", "terminal"]);
+    expect(JSON.stringify(persisted)).not.toContain("pa55word");
+  });
+
+  it("does not treat an unrelated widened control as protected-evidence policy", async () => {
+    // Section 6.1: widening the event sink's own control (`events`) is not the
+    // spec-named lever. Only `errors: "protected-evidence"` flips the
+    // NodeAttemptFailed evidence branch; everything else keeps the
+    // metadata-only shape.
+    const protection = memoryProtection({
+      policy: { ...TEST_CAPTURE_POLICY, events: "allow-redacted" },
+    });
+    const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 1 } })] });
+    await startDurableGraphRun(retrying, {}, {
+      runId: "failure-evidence-events-widened",
+      implementationId: "v1",
+      protection,
+      nodeExecutors: {
+        root: () => {
+          throw new Error("connection to db://user:pa55word@host refused");
+        },
+      },
+    });
+    const persisted = await persistedHistory(protection, "failure-evidence-events-widened");
+    const failed = persisted.find((event) => event.type === "NodeAttemptFailed");
+    expect(failed?.payloadDisposition).toBe("metadata-only");
+    expect(Object.keys(failed?.data as object).sort()).toEqual(["failure", "terminal"]);
+    expect(JSON.stringify(persisted)).not.toContain("pa55word");
+  });
+
+  it("evaluates the shared Section 6.1/1.2 evidence predicate mode by mode", () => {
+    // The pure predicate both language lanes share. `errors` is the only lever:
+    // protected-evidence alone flips it, codes-only is disabled, and no other
+    // control's widening substitutes for the errors mode.
+    const cases: ReadonlyArray<readonly [Partial<typeof TEST_CAPTURE_POLICY>, boolean]> = [
+      [{}, false],
+      [{ errors: "protected-evidence" }, true],
+      [{ errors: "codes-only" }, false],
+      [{ errors: "codes-and-sanitized-message" }, false],
+      [{ events: "allow-redacted" }, false],
+      [{ errors: "protected-evidence", events: "allow-redacted" }, true],
+    ];
+    for (const [overrides, expected] of cases) {
+      expect(
+        diagnosticEvidenceAuthorized({ ...TEST_CAPTURE_POLICY, ...overrides }, "event-journal"),
+      ).toBe(expected);
+    }
+  });
+
+  it("pins codes-only as a disabled mode in the pair-enablement formula", () => {
+    // Section 1.2: enablement spans the union of the source row's control and
+    // the sink row's controls. `errors: "codes-only"` widens the union away
+    // from the default profile but is itself disabled, so the pair stays off;
+    // `errors: "protected-evidence"` both widens and enables it.
+    const pair = (overrides: Partial<typeof TEST_CAPTURE_POLICY>): boolean =>
+      policyEnabledFor({ ...TEST_CAPTURE_POLICY, ...overrides }, "exception-message", "event-journal");
+    expect(pair({})).toBe(false);
+    expect(pair({ errors: "codes-only" })).toBe(false);
+    expect(pair({ errors: "protected-evidence" })).toBe(true);
+    // The generic Section 1.2 gate is wider than the Section 6.1 evidence gate:
+    // an events widening enables the pair but not the evidence branch above.
+    expect(pair({ events: "allow-redacted" })).toBe(true);
+    expect(controlEnabled({ ...TEST_CAPTURE_POLICY, errors: "codes-only" }, "errors")).toBe(false);
+    expect(controlEnabled(TEST_CAPTURE_POLICY, "errors")).toBe(true);
   });
 });
 

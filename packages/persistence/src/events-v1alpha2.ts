@@ -32,6 +32,7 @@ export const GRAPH_EVENT_V1ALPHA2_TYPES = [
   "NodeRetried",
   "NodeSucceeded",
   "EdgeEmitted",
+  "BarrierSatisfied",
   "RunCancelled",
   "RunFailed",
   "RunSucceeded",
@@ -205,6 +206,26 @@ const EVENT_TYPE_RULES: Readonly<Record<GraphEventV1Alpha2Type, readonly EventTy
         data: { required: ["outputMac"] },
       },
     ],
+    BarrierSatisfied: [
+      {
+        // The decision document is authoritative content (the barrier's bound
+        // output when satisfied), so it travels as a protected reference exactly
+        // like a NodeSucceeded output. The closed inline projection carries the
+        // two domain-separated identities and the two decision enums only.
+        disposition: "protected-ref",
+        identity: "node-only",
+        data: {
+          required: [
+            "decisionRef",
+            "decisionMac",
+            "policyHash",
+            "decisionId",
+            "satisfied",
+            "resolution",
+          ],
+        },
+      },
+    ],
     RunCancelled: [
       {
         disposition: "protected-ref",
@@ -259,6 +280,18 @@ const ATTEMPT_FAILURE_CAUSE_CODES: ReadonlySet<string> = new Set([
   "VALIDATION",
   "PROCESS_LOST",
   "ROUTER_CONTRACT",
+]);
+
+/**
+ * `$defs.barrierDecisionResolution`: the closed four-member resolution set of
+ * spec/barrier-decision.schema.json `#/properties/resolution`, mirrored inline
+ * exactly as the schema mirrors it.
+ */
+const BARRIER_DECISION_RESOLUTIONS: ReadonlySet<string> = new Set([
+  "satisfied",
+  "failed",
+  "unknown",
+  "awaiting_human",
 ]);
 
 /** `$defs.settledFailureCode`. There is deliberately no sentinel member. */
@@ -406,6 +439,25 @@ function dataIssues(
     !SETTLED_FAILURE_CODES.has(data["failureCode"] as string)
   ) {
     issues.push({ path: "#/data/failureCode", message: "not a settled failure code" });
+  }
+  if (type === "BarrierSatisfied") {
+    for (const key of ["decisionMac", "policyHash", "decisionId"] as const) {
+      if (Object.hasOwn(data, key) && (typeof data[key] !== "string" || !SHA256.test(data[key] as string))) {
+        issues.push({
+          path: `#/data/${key}`,
+          message: "expected 64 lowercase hexadecimal characters",
+        });
+      }
+    }
+    if (Object.hasOwn(data, "satisfied") && typeof data["satisfied"] !== "boolean") {
+      issues.push({ path: "#/data/satisfied", message: "expected a boolean" });
+    }
+    if (
+      Object.hasOwn(data, "resolution") &&
+      !BARRIER_DECISION_RESOLUTIONS.has(data["resolution"] as string)
+    ) {
+      issues.push({ path: "#/data/resolution", message: "unknown barrier resolution" });
+    }
   }
   if (type === "NodeScheduled") {
     const sideEffects = data["sideEffects"];

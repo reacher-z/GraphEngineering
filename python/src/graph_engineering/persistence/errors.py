@@ -15,6 +15,7 @@ class PersistenceErrorCode(StrEnum):
     VERSION_CONFLICT = "VERSION_CONFLICT"
     CORRUPT_EVENT_LOG = "CORRUPT_EVENT_LOG"
     CORRUPT_CHECKPOINT = "CORRUPT_CHECKPOINT"
+    CHECKPOINT_PROTECTION_REQUIRED = "CHECKPOINT_PROTECTION_REQUIRED"
     IO = "PERSISTENCE_IO"
 
 
@@ -101,6 +102,26 @@ class CorruptCheckpointError(PersistenceError):
             PersistenceErrorCode.CORRUPT_CHECKPOINT,
             f"checkpoint {run_id!r}/{checkpoint_id!r} is corrupt: {reason}",
             {"runId": run_id, "checkpointId": checkpoint_id, "reason": reason},
+        )
+
+
+class CheckpointProtectionRequiredError(PersistenceError):
+    """Section 4.2 fail-closed refusal for the guarded checkpoint path.
+
+    A guarded checkpoint save that would persist an authoritative application
+    value without a compatible protected payload store plus key provider — or
+    through anything other than a guard-minted ``PreparedSinkWrite`` — fails
+    before the first byte, temporary file, or store operation.  There is no
+    inline fallback.
+    """
+
+    def __init__(self, reason: str, details: Mapping[str, Any] | None = None) -> None:
+        self.reason = reason
+        super().__init__(
+            PersistenceErrorCode.CHECKPOINT_PROTECTION_REQUIRED,
+            "guarded checkpoint persistence requires a protected payload store"
+            " and key provider",
+            {"reason": reason, **dict(details or {})},
         )
 
 

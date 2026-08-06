@@ -27,7 +27,13 @@ import {
   type RecoveredEvent,
 } from "./durable-protection.js";
 import {
+  BARRIER_RESOLUTION_STATUS,
+  bindIntegratedBarriers,
+  type BarrierBinding,
+} from "./barrier-runtime.js";
+import {
   type SchedulerAttemptIdentity,
+  type SchedulerDecisionCommitted,
   type SchedulerInternalOptions,
   type SchedulerJournal,
   type SchedulerRunResult,
@@ -54,6 +60,7 @@ import {
   graphConditionCapabilityIssues,
 } from "./router-runtime.js";
 import type {
+  CommittedDecisionEvent,
   GraphRunFailure,
   GraphRunResult,
   JsonValue,
@@ -174,7 +181,13 @@ function isCompilationFailure(
 function capabilityFailure(
   compiled: CompiledDurableGraph,
 ): DurableGraphRunResult | undefined {
-  const runtimeIssues = graphRuntimeCapabilityIssues(compiled.graph);
+  // The durable scheduler now journals `BarrierSatisfied` through the mandatory
+  // payload-protection path and folds committed decisions on resume, so it
+  // truthfully claims the integrated-barrier capability exactly as the ordinary
+  // scheduler does.
+  const runtimeIssues = graphRuntimeCapabilityIssues(compiled.graph, {
+    integratedBarrier: true,
+  });
   const conditionIssues = graphConditionCapabilityIssues(compiled.graph);
   if (runtimeIssues.length === 0 && conditionIssues.length === 0) return undefined;
   return {
@@ -581,6 +594,10 @@ class DurableJournal implements SchedulerJournal {
   readonly retryAvailableAt = new Map<string, string>();
   readonly activityKeys: Map<string, string>;
   readonly eventIds: Set<string>;
+  /** Barrier nodes whose config claims and validates as an exact policy. */
+  readonly claimedBarriers: ReadonlyMap<string, BarrierBinding>;
+  /** Barriers whose committed decision this journal has already appended. */
+  readonly decidedBarriers: Set<string>;
 
   version: number;
   #queue: Promise<void> = Promise.resolve();
@@ -596,6 +613,7 @@ class DurableJournal implements SchedulerJournal {
     preScheduled?: ReadonlyMap<string, number>;
     activityKeys?: ReadonlyMap<string, string>;
     eventIds?: ReadonlySet<string>;
+    decidedBarriers?: ReadonlySet<string>;
   }) {
     this.compiled = fields.compiled;
     this.runId = fields.runId;
@@ -606,6 +624,8 @@ class DurableJournal implements SchedulerJournal {
     this.preScheduled = new Map(fields.preScheduled);
     this.activityKeys = new Map(fields.activityKeys);
     this.eventIds = new Set(fields.eventIds);
+    this.claimedBarriers = bindIntegratedBarriers(fields.compiled.graph);
+    this.decidedBarriers = new Set(fields.decidedBarriers);
   }
 
   /** Section 8.2: the activity key is keyed by the run identity and the input MAC. */
@@ -842,11 +862,96 @@ class DurableJournal implements SchedulerJournal {
     await this.append(drafts);
   }
 
+  /**
+   * Journal one committed decision through the same mandatory payload-protection
+   * path as every other authoritative value: the decision document exists on the
+   * wire only as a validated protected reference, and the closed inline
+   * projection carries the two domain-separated identities and the two decision
+   * enums, which the fold checks against the protected document on resume.
+   *
+   * The scheduler awaits this before the barrier settles, so the decision is
+   * durable before any downstream dispatch (the `beforeAttempt` discipline).
+   */
+  async decisionCommitted(fields: SchedulerDecisionCommitted): Promise<void> {
+    if (fields.event.type === "HumanInputRequested") {
+      // `events/v1alpha2` deliberately has no `HumanInputRequested` type
+      // (spec/README.md: its `data` is an open object on the legacy wire, and
+      // widening the closed envelope is not this lane's call). Its payload is
+      // exactly the decision document the `BarrierSatisfied` record committed
+      // immediately above, so nothing truthful is lost; approval integration
+      // remains D9-APPROVAL-077 authority.
+      return;
+    }
+    if (fields.event.type !== "BarrierSatisfied") {
+      throw new DurableRunError(
+        "UNREPRESENTABLE_DURABLE_OUTCOME",
+        this.runId,
+        "the durable journal has no v1alpha2 record for this decision event",
+        { nodeId: fields.node.id, type: fields.event.type },
+      );
+    }
+    const document = fields.event.data;
+    if (!isRecord(document) ||
+        typeof document["policyHash"] !== "string" ||
+        typeof document["decisionId"] !== "string" ||
+        typeof document["satisfied"] !== "boolean" ||
+        typeof document["resolution"] !== "string") {
+      throw invalidHistory(this.runId, "committed barrier decision is not a decision document", {
+        nodeId: fields.node.id,
+      });
+    }
+    await this.append([{
+      type: "BarrierSatisfied",
+      nodeId: fields.node.id,
+      data: {
+        policyHash: document["policyHash"],
+        decisionId: document["decisionId"],
+        satisfied: document["satisfied"],
+        resolution: document["resolution"],
+      },
+      payloads: [{
+        field: "decisionRef",
+        semanticContext: nodeContext("node-result", this.runId, fields.node.id),
+        value: document,
+      }],
+    }]);
+    this.decidedBarriers.add(fields.node.id);
+  }
+
   async nodeSettledWithoutAttempt(fields: {
     graph: GraphSpec;
     node: NodeSpec;
     result: NodeRunResult;
   }): Promise<void> {
+    if (this.decidedBarriers.has(fields.node.id)) {
+      // The `BarrierSatisfied` record already appended IS the durable
+      // settlement of a decided barrier: the node result is a pure function of
+      // the protected decision document, and the fold rebuilds it from there.
+      // A second record would have no truthful closed shape (`nodeSettledData`
+      // cannot carry a success, an `unknown`, or an `awaiting_human`).
+      return;
+    }
+    if (this.claimedBarriers.has(fields.node.id) &&
+        (fields.result.status !== "skipped" ||
+          fields.result.failure?.code !== "NODE_CANCELLED")) {
+      // The only undecided-barrier settlement `events/v1alpha2` can carry
+      // truthfully is the unarmed-cancellation skip. A cancelled armed barrier
+      // (`cancelled` with no failure) and a malformed quorum vote
+      // (`INVALID_BARRIER_VOTE` after one attempt) are outside the frozen
+      // closed enums, so the journal fails closed instead of misfiling them.
+      throw new DurableRunError(
+        "UNREPRESENTABLE_DURABLE_OUTCOME",
+        this.runId,
+        "events/v1alpha2 cannot truthfully record this barrier settlement",
+        {
+          nodeId: fields.node.id,
+          status: fields.result.status,
+          ...(fields.result.failure === undefined
+            ? {}
+            : { failureCode: fields.result.failure.code }),
+        },
+      );
+    }
     const document = nodeResultDocument(fields.result);
     await this.append([{
       type: "NodeSettledWithoutAttempt",
@@ -861,6 +966,35 @@ class DurableJournal implements SchedulerJournal {
   }
 
   async runTerminal(result: SchedulerRunResult): Promise<void> {
+    if (result.status === "awaiting_human") {
+      // Not a terminal. The run is suspended on a committed `awaiting_human`
+      // decision that is already durable; the authority that may resume it is
+      // D9-APPROVAL-077 work. The stream deliberately stays non-terminal, and a
+      // resume folds the committed decision and halts again with zero rejudge.
+      return;
+    }
+    const representableNodes = result.nodes.every((node) =>
+      node.status === "succeeded" || node.status === "failed" || node.status === "skipped");
+    const representableRun = result.status === "succeeded" ||
+      result.status === "failed" || result.status === "cancelled";
+    if (!representableRun || !representableNodes) {
+      // An `unknown` run terminal (or a node outside succeeded/failed/skipped)
+      // has no truthful closed shape in the frozen v1alpha2 terminal record.
+      // Fail closed: everything already appended is true, no terminal is
+      // written, and the refusal is structured rather than a misfiled status.
+      throw new DurableRunError(
+        "UNREPRESENTABLE_DURABLE_OUTCOME",
+        this.runId,
+        "events/v1alpha2 cannot truthfully record this run terminal",
+        {
+          status: result.status,
+          unrepresentableNodeIds: result.nodes
+            .filter((node) => node.status !== "succeeded" &&
+              node.status !== "failed" && node.status !== "skipped")
+            .map((node) => node.nodeId),
+        },
+      );
+    }
     const type: GraphEventV1Alpha2Type = result.status === "succeeded"
       ? "RunSucceeded"
       : result.status === "cancelled"
@@ -891,6 +1025,14 @@ const RUNTIME_FAILURE_CODES = new Set<NodeRunFailure["code"]>([
   "INPUT_BINDING_FAILED",
   "ATTEMPT_BUDGET_EXHAUSTED",
   "NODE_EXECUTION_INTERRUPTED",
+  // Integrated-barrier outcomes that legitimately reach the wire: a barrier
+  // whose committed decision resolved `fail`, a source that settled after a
+  // `reject` barrier decided, and a descendant of an `unknown` barrier.
+  // `INVALID_BARRIER_VOTE` is deliberately absent: the journal refuses that
+  // settlement as UNREPRESENTABLE_DURABLE_OUTCOME, so no history carries it.
+  "BARRIER_NOT_SATISFIED",
+  "BARRIER_LATE_ARRIVAL",
+  "UPSTREAM_UNKNOWN",
 ]);
 
 function booleanValue(value: unknown, runId: string, context: string): boolean {
@@ -1134,6 +1276,13 @@ interface FoldedRun {
   readonly terminalResult: DecodedTerminalResult | undefined;
   readonly eventIds: ReadonlySet<string>;
   readonly version: number;
+  /**
+   * Every `BarrierSatisfied` decision found in the history, in event order.
+   * Zero-rejudge replay: the scheduler adopts these instead of re-deciding, so
+   * a resumed run makes zero executor calls and appends zero new decision
+   * events for an already-decided barrier.
+   */
+  readonly committedDecisions: readonly CommittedDecisionEvent[];
 }
 
 function maxNodeAttempts(node: NodeSpec): number {
@@ -1289,10 +1438,11 @@ function validateTerminalResult(fields: {
   completionOrder: readonly string[];
   maxObservedConcurrency: number;
   totalAttempts: number;
+  lateArrivalFailures: readonly NodeRunFailure[];
 }): void {
   const {
     runId, terminalType, terminal, compiled, projections, graphInput, scheduledOrder,
-    completionOrder, maxObservedConcurrency, totalAttempts,
+    completionOrder, maxObservedConcurrency, totalAttempts, lateArrivalFailures,
   } = fields;
   const expectedStatus = terminalType === "RunSucceeded"
     ? "succeeded"
@@ -1315,8 +1465,17 @@ function validateTerminalResult(fields: {
   const failures: GraphRunFailure[] = [];
   for (const nodeId of compiled.orderedNodeIds) {
     const failure = expectedNodes.get(nodeId)?.failure;
-    if (failure !== undefined && failure.code !== "ROUTE_NOT_SELECTED") failures.push(failure);
+    // `UPSTREAM_UNKNOWN` is excluded from graph failure codes exactly as
+    // `ROUTE_NOT_SELECTED` already is: neither invents a node failure.
+    if (failure !== undefined && failure.code !== "ROUTE_NOT_SELECTED" &&
+        failure.code !== "UPSTREAM_UNKNOWN") {
+      failures.push(failure);
+    }
   }
+  // Late arrivals under a `reject` policy are graph failures with no node
+  // result of their own; the scheduler appends them after the node failures,
+  // in observation order, and the fold reconstructed them from event order.
+  failures.push(...lateArrivalFailures);
   const output = Object.create(null) as Record<string, JsonValue>;
   let outputsComplete = true;
   for (const [name, endpoint] of Object.entries(compiled.graph.outputs)
@@ -1361,6 +1520,16 @@ function validateTerminalResult(fields: {
   }
 }
 
+/**
+ * An upstream that settled `unknown`, or that inherited the zero-attempt
+ * `UPSTREAM_UNKNOWN` terminal from one. Mirrors `isUnknownTerminal` in the
+ * scheduler: neither is a failure.
+ */
+function isUnknownUpstreamTerminal(result: NodeRunResult | undefined): boolean {
+  return result?.status === "unknown" ||
+    (result?.status === "skipped" && result.failure?.code === "UPSTREAM_UNKNOWN");
+}
+
 function validateSettledWithoutAttempt(fields: {
   runId: string;
   compiled: CompiledDurableGraph;
@@ -1371,10 +1540,11 @@ function validateSettledWithoutAttempt(fields: {
   totalAttempts: number;
   maxTotalAttempts: number;
   pendingRetryReservations: number;
+  claimedBarrier: boolean;
 }): void {
   const {
     runId, compiled, graphInput, projections, projection, result, totalAttempts,
-    maxTotalAttempts, pendingRetryReservations,
+    maxTotalAttempts, pendingRetryReservations, claimedBarrier,
   } = fields;
   const nodeId = projection.nodeId;
   const node = compiled.nodesById.get(nodeId) as NodeSpec;
@@ -1383,6 +1553,32 @@ function validateSettledWithoutAttempt(fields: {
       result.failure === undefined || result.failure.nodeId !== nodeId ||
       result.failure.attempt !== projection.attempts) {
     throw invalidHistory(runId, "NodeSettledWithoutAttempt result identity is invalid", { nodeId });
+  }
+  if (claimedBarrier) {
+    // A decided barrier settles through `BarrierSatisfied`, never through this
+    // event, and the journal refuses every unrepresentable barrier settlement.
+    // The single legal shape here is the unarmed-cancellation skip, which the
+    // scheduler may commit while upstream sources are still unsettled.
+    const expectedCancelled: NodeRunResult = {
+      nodeId,
+      sequence: compiled.sequence.get(nodeId) as number,
+      status: "skipped",
+      attempts: 0,
+      failure: runtimeFailure(
+        nodeId,
+        "NODE_CANCELLED",
+        `Node '${nodeId}' did not start because the run was cancelled`,
+        0,
+      ),
+    };
+    if (!sameSettledResultSemantics(result, expectedCancelled)) {
+      throw invalidHistory(
+        runId,
+        "NodeSettledWithoutAttempt on an integrated barrier is not the unarmed-cancellation skip",
+        { nodeId, code: result.failure.code },
+      );
+    }
+    return;
   }
   const committed = new Map<string, NodeRunResult>();
   for (const [id, item] of projections) {
@@ -1402,10 +1598,16 @@ function validateSettledWithoutAttempt(fields: {
   }
   const activeIncoming = incoming.filter((edge) =>
     edgeIsActive(edge, committed.get(edge.from.node) as NodeRunResult));
-  const failedUpstream = [...new Set(activeIncoming
+  const unsucceededUpstream = [...new Set(activeIncoming
     .map((edge) => edge.from.node)
     .filter((upstreamId) => committed.get(upstreamId)?.status !== "succeeded"))]
     .sort(compareUnicodeCodePoints);
+  const unknownUpstream = unsucceededUpstream.filter(
+    (upstreamId) => isUnknownUpstreamTerminal(committed.get(upstreamId)),
+  );
+  const failedUpstream = unsucceededUpstream.filter(
+    (upstreamId) => !isUnknownUpstreamTerminal(committed.get(upstreamId)),
+  );
 
   let expected: NodeRunResult | undefined;
   const conditionIssues = (compiled.outgoing.get(nodeId) ?? [])
@@ -1471,6 +1673,24 @@ function validateSettledWithoutAttempt(fields: {
         ),
       };
     }
+  } else if (failedUpstream.length === 0 && unknownUpstream.length > 0) {
+    // A descendant reachable only through a barrier that resolved `unknown`
+    // inherits the zero-attempt `UPSTREAM_UNKNOWN` terminal, exactly as the
+    // scheduler derives it. A genuine upstream failure still outranks it.
+    expected = {
+      nodeId,
+      sequence: compiled.sequence.get(nodeId) as number,
+      status: "skipped",
+      attempts: projection.attempts,
+      failure: runtimeFailure(
+        nodeId,
+        "UPSTREAM_UNKNOWN",
+        `Node '${nodeId}' did not start because upstream nodes are unknown: `
+          + unknownUpstream.join(", "),
+        projection.attempts,
+        { upstreamNodeIds: unknownUpstream },
+      ),
+    };
   } else if (failedUpstream.length > 0) {
     expected = {
       nodeId,
@@ -1612,6 +1832,43 @@ function foldHistory(
   }> = [];
   let expectedRetry: { nodeId: string; attempt: number; activityKey: string } | undefined;
   const eventIds = new Set<string>();
+  const barrierBindings = bindIntegratedBarriers(compiled.graph);
+  const committedDecisions: CommittedDecisionEvent[] = [];
+  /** Sources still unsettled when each barrier's decision committed. */
+  const barrierLateSources = new Map<string, Set<string>>();
+  const lateArrivalFailures: NodeRunFailure[] = [];
+
+  /**
+   * A source that settles after a barrier already committed its decision. The
+   * committed decision is immutable either way; under a `reject` policy the
+   * late arrival is the recorded run failure the scheduler emitted, rebuilt
+   * here in the same observation order.
+   */
+  const observeLateSettle = (sourceNodeId: string): void => {
+    for (const [barrierNodeId, pending] of barrierLateSources) {
+      if (!pending.delete(sourceNodeId)) continue;
+      if (barrierBindings.get(barrierNodeId)?.policy.lateArrival !== "reject") continue;
+      lateArrivalFailures.push(runtimeFailure(
+        barrierNodeId,
+        "BARRIER_LATE_ARRIVAL",
+        `Barrier '${barrierNodeId}' had already decided when upstream `
+          + `'${sourceNodeId}' settled`,
+        0,
+        { upstreamNodeIds: [sourceNodeId] },
+      ));
+    }
+  };
+
+  /** An attempt-bearing event may never target a claimed integrated barrier. */
+  const assertNotClaimedBarrier = (nodeId: string, type: string): void => {
+    if (barrierBindings.has(nodeId)) {
+      throw invalidHistory(
+        runId,
+        `${type} targets an integrated barrier, which is decided with zero attempts`,
+        { nodeId },
+      );
+    }
+  };
 
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index] as RecoveredEvent;
@@ -1866,6 +2123,7 @@ function foldHistory(
         totalAttempts,
         maxTotalAttempts,
         pendingRetryReservations: pendingRetryReservations.size,
+        claimedBarrier: barrierBindings.has(nodeId),
       });
       projection.result = result;
       projection.scheduledAttempt = undefined;
@@ -1873,12 +2131,107 @@ function foldHistory(
       projection.retryAvailableAt = undefined;
       if (!scheduledOrder.includes(nodeId)) scheduledOrder.push(nodeId);
       if (!completionOrder.includes(nodeId)) completionOrder.push(nodeId);
+      observeLateSettle(nodeId);
+      continue;
+    }
+
+    if (event.type === "BarrierSatisfied") {
+      if (event.edgeId !== undefined || event.attempt !== undefined) {
+        throw invalidHistory(runId, "BarrierSatisfied must omit edgeId and attempt");
+      }
+      const nodeId = eventNode(event, compiled, runId);
+      const binding = barrierBindings.get(nodeId);
+      if (binding === undefined) {
+        throw invalidHistory(
+          runId,
+          "BarrierSatisfied targets a node without a claimed integrated barrier policy",
+          { nodeId },
+        );
+      }
+      const projection = projections.get(nodeId) as NodeProjection;
+      if (projection.result !== undefined || projection.openAttempt !== undefined ||
+          projection.scheduledAttempt !== undefined || projection.attempts !== 0) {
+        // One decision per node per run: a second event here is the write-side
+        // impossibility that adoption reports as DUPLICATE_DECISION.
+        throw invalidHistory(runId, "BarrierSatisfied targets an open, attempted, or decided node", {
+          nodeId,
+        });
+      }
+      exactKeys(
+        event.data,
+        ["decision", "decisionMac", "policyHash", "decisionId", "satisfied", "resolution"],
+        runId,
+        "BarrierSatisfied.data",
+      );
+      let decision: JsonValue;
+      try {
+        decision = decodeDurableJson(event.data.decision);
+      } catch (error) {
+        throw invalidHistory(runId, "BarrierSatisfied decision is malformed", {}, { cause: error });
+      }
+      if (run.valueMac(nodeContext("node-result", runId, nodeId), decision) !==
+          event.data.decisionMac) {
+        throw invalidHistory(runId, "BarrierSatisfied decisionMac is invalid", { nodeId });
+      }
+      if (!isRecord(decision)) {
+        throw invalidHistory(runId, "BarrierSatisfied decision must be an object", { nodeId });
+      }
+      // The closed inline projection must agree with the protected document.
+      if (event.data.policyHash !== decision["policyHash"] ||
+          event.data.decisionId !== decision["decisionId"] ||
+          event.data.satisfied !== decision["satisfied"] ||
+          event.data.resolution !== decision["resolution"] ||
+          decision["barrierNodeId"] !== nodeId) {
+        throw invalidHistory(
+          runId,
+          "BarrierSatisfied metadata contradicts its protected decision",
+          { nodeId },
+        );
+      }
+      const resolution = decision["resolution"] as keyof typeof BARRIER_RESOLUTION_STATUS;
+      const status = BARRIER_RESOLUTION_STATUS[resolution];
+      if (status === undefined) {
+        throw invalidHistory(runId, "BarrierSatisfied decision has no resolution", { nodeId });
+      }
+      // Zero-rejudge: the decision is never recomputed here. Its policy and
+      // identity are checked by `adoptCommittedDecisions` before the scheduler
+      // adopts it, which is where drift and forgery are refused.
+      projection.result = {
+        nodeId,
+        sequence: compiled.sequence.get(nodeId) as number,
+        status,
+        attempts: 0,
+        ...(status === "succeeded" ? { output: decision as unknown as JsonValue } : {}),
+        ...(status === "failed"
+          ? {
+            failure: runtimeFailure(
+              nodeId,
+              "BARRIER_NOT_SATISFIED",
+              `Barrier '${nodeId}' was not satisfied`,
+              0,
+            ),
+          }
+          : {}),
+      };
+      if (!scheduledOrder.includes(nodeId)) scheduledOrder.push(nodeId);
+      if (!completionOrder.includes(nodeId)) completionOrder.push(nodeId);
+      committedDecisions.push({
+        type: "BarrierSatisfied",
+        nodeId,
+        data: decision,
+      });
+      barrierLateSources.set(nodeId, new Set(
+        binding.incoming
+          .filter((edge) => projections.get(edge.from.node)?.result === undefined)
+          .map((edge) => edge.from.node),
+      ));
       continue;
     }
 
     if (event.type === "NodeScheduled") {
       if (event.edgeId !== undefined) throw invalidHistory(runId, "NodeScheduled has an edge identity");
       const nodeId = eventNode(event, compiled, runId);
+      assertNotClaimedBarrier(nodeId, "NodeScheduled");
       const attempt = eventAttempt(event, runId);
       const projection = projections.get(nodeId) as NodeProjection;
       if (projection.result !== undefined || projection.openAttempt !== undefined) {
@@ -2045,6 +2398,7 @@ function foldHistory(
         output,
       };
       if (!completionOrder.includes(nodeId)) completionOrder.push(nodeId);
+      observeLateSettle(nodeId);
       expectedEdges = (compiled.outgoing.get(nodeId) ?? []).map((edge) => ({
         edgeId: edge.id, producerId: nodeId, attempt, outputMac,
       }));
@@ -2121,6 +2475,7 @@ function foldHistory(
           failure,
         };
         if (!completionOrder.includes(nodeId)) completionOrder.push(nodeId);
+        observeLateSettle(nodeId);
       } else {
         if (projection.activityKey === undefined) {
           throw invalidHistory(runId, "retry has no activity key");
@@ -2162,6 +2517,7 @@ function foldHistory(
         completionOrder,
         maxObservedConcurrency,
         totalAttempts,
+        lateArrivalFailures,
       });
       terminalSeen = true;
       continue;
@@ -2197,6 +2553,7 @@ function foldHistory(
     terminalResult,
     eventIds,
     version: (events.at(-1) as RecoveredEvent).sequence,
+    committedDecisions,
   };
 }
 
@@ -2376,7 +2733,8 @@ function stableOptions(options: DurableSchedulerOptions): DurableSchedulerOption
 
 function schedulerOptions(
   options: DurableSchedulerOptions,
-  extra: Omit<SchedulerInternalOptions, keyof SchedulerOptions>,
+  extra: Omit<SchedulerInternalOptions, keyof SchedulerOptions> &
+    Pick<SchedulerOptions, "committedDecisions">,
 ): SchedulerInternalOptions {
   return {
     ...(options.nodeExecutors === undefined
@@ -2387,6 +2745,12 @@ function schedulerOptions(
       : { executors: options.executors as unknown as NonNullable<SchedulerOptions["executors"]> }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    // Every decision this run commits is framed over the durable run identity:
+    // the runId and the fixed durable graph revision are exactly what
+    // `decisionId` domain-separates, so a decision transplanted from another
+    // run cannot recompute.
+    decision: { runId: options.runId, graphRevision: GRAPH_REVISION },
     ...extra,
   };
 }
@@ -2400,6 +2764,7 @@ function publicResult(result: SchedulerRunResult): DurableGraphRunResult {
     failures: result.failures,
     maxObservedConcurrency: result.maxObservedConcurrency,
     totalAttempts: result.totalAttempts,
+    ...(result.decisionEvents === undefined ? {} : { decisionEvents: result.decisionEvents }),
   };
 }
 
@@ -2577,6 +2942,7 @@ export async function resumeDurableGraphRun(
     now,
     createEventId: effectiveEventIdFactory(options),
     eventIds: folded.eventIds,
+    decidedBarriers: new Set(folded.committedDecisions.map((decision) => decision.nodeId)),
     preScheduled: new Map(
       [...folded.projections]
         .filter(([, projection]) => projection.scheduledAttempt !== undefined &&
@@ -2699,6 +3065,11 @@ export async function resumeDurableGraphRun(
       initialScheduledOrder: folded.scheduledOrder,
       initialCompletionOrder,
       initialRetryDelaysMs: retryDelays,
+      // Zero-rejudge replay: adopted decisions are never re-judged, their
+      // executors are never called, and no second decision event is appended.
+      ...(folded.committedDecisions.length === 0
+        ? {}
+        : { committedDecisions: folded.committedDecisions }),
     }),
   );
   return publicResult(result);

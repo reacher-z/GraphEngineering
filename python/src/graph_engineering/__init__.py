@@ -230,6 +230,7 @@ from .primitives import (
 from .scheduler import (
     AsyncScheduler,
     CancellationSignal,
+    DecisionContext,
     FailureCode,
     NodeContext,
     NodeFailure,
@@ -238,6 +239,7 @@ from .scheduler import (
     NodeStatus,
     RunResult,
     RunStatus,
+    ScriptedClock,
     run_graph,
 )
 from .source import (
@@ -370,6 +372,7 @@ __all__ = [
     "CycleStoreRecord",
     "CycleStoreSchemaInspection",
     "CycleStoreTail",
+    "DecisionContext",
     "Diagnostic",
     "DiagnosticCode",
     "DurableJsonError",
@@ -439,6 +442,7 @@ __all__ = [
     "RunResult",
     "RunStatus",
     "SQLiteCycleStoreProvider",
+    "ScriptedClock",
     "SettledBarrierPolicy",
     "SettledBarrierReasonCode",
     "SettledBarrierResult",

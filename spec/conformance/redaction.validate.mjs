@@ -95,6 +95,36 @@ const POLICY_MODE_VOCABULARY = Object.freeze({
   identifiers: ["generated-opaque-only", "protected", "inline-unredacted"],
 });
 
+// Section 4.1 default stable profile modes. Declared here rather than read
+// from the corpus so a corpus edit cannot silently redefine the baseline the
+// Section 1.2 widening formula compares against.
+const DEFAULT_POLICY_MODES = Object.freeze({
+  durableValues: "protected",
+  checkpointValues: "protected",
+  events: "metadata-or-protected",
+  artifacts: "off",
+  errors: "codes-and-sanitized-message",
+  logs: "metadata-only",
+  traces: "off",
+  metrics: "off",
+  prompts: "off",
+  responses: "off",
+  tools: "off",
+  mcp: "off",
+  plugins: "off",
+  isolationOutputs: "off",
+  database: "off",
+  exports: "off",
+  supportBundles: "off",
+  testArtifacts: "off",
+  identifiers: "generated-opaque-only",
+});
+
+// Section 1.2/4.1: the disabled modes. `codes-only` means stable codes only,
+// with no payload evidence in any form; the `deny` pseudo-control has no
+// enabling mode at all.
+const DISABLED_POLICY_MODES = Object.freeze(["off", "codes-only"]);
+
 // Section 11 limit key per corpus mutation operator, plus the failure code the
 // contract requires. Declared here rather than read from the corpus so a
 // corpus edit cannot silently redefine the rule it is supposed to prove.
@@ -707,6 +737,7 @@ export async function validateRedactionFixture() {
   const idSections = [
     "sinkPolicyCases",
     "flowCases",
+    "policyEnablementCases",
     "wireCases",
     "pointerCases",
     "semanticCases",
@@ -845,6 +876,58 @@ export async function validateRedactionFixture() {
     );
   }
 
+  // --- Section 1.2 widening / Section 6.1 protected-evidence enablement ----
+  // Recomputed from the closed tables above: `pairEnabled` is the Section 1.2
+  // formula (default matrix, explicit widening over the union of the source
+  // row's control and the sink row's controls, every control in that union
+  // enabled), and `evidenceAuthorized` is the stricter Section 6.1 gate that
+  // additionally requires `errors: "protected-evidence"` itself.
+  for (const enablementCase of fixture.policyEnablementCases) {
+    const sourceRow = sourceRows.get(enablementCase.sourceClass);
+    const sinkRow = sinkRows.get(enablementCase.sink);
+    assert.ok(sourceRow !== undefined, `${enablementCase.id} names an unclassified source`);
+    assert.ok(sinkRow !== undefined, `${enablementCase.id} names an unclassified sink`);
+    const modes = { ...DEFAULT_POLICY_MODES, ...enablementCase.policyOverrides };
+    const controlUnion = [sourceRow.policyControl, ...sinkRow.policyControls];
+    const widened = controlUnion.some(
+      (control) => control !== "deny" && modes[control] !== DEFAULT_POLICY_MODES[control],
+    );
+    const controlEnabled = (control) =>
+      control !== "deny" && !DISABLED_POLICY_MODES.includes(modes[control]);
+    let pairEnabled;
+    if ((!sinkRow.defaultEnabled || sourceRow.defaultAction === "off") && !widened) {
+      pairEnabled = false;
+    } else {
+      pairEnabled = controlUnion.every(controlEnabled);
+    }
+    const evidenceAuthorized = modes.errors === "protected-evidence" && pairEnabled;
+    assert.equal(
+      pairEnabled,
+      enablementCase.expected.pairEnabled,
+      `${enablementCase.id} pairEnabled drifted`,
+    );
+    assert.equal(
+      evidenceAuthorized,
+      enablementCase.expected.evidenceAuthorized,
+      `${enablementCase.id} evidenceAuthorized drifted`,
+    );
+    assert.equal(
+      evidenceAuthorized ? "protected-ref" : "metadata-only",
+      enablementCase.expected.nodeAttemptFailedDisposition,
+      `${enablementCase.id} NodeAttemptFailed disposition drifted`,
+    );
+  }
+  assert.ok(
+    fixture.policyEnablementCases.some((item) => item.expected.evidenceAuthorized),
+    "no policyEnablementCases entry authorizes evidence, so the lever is unwitnessed",
+  );
+  assert.ok(
+    fixture.policyEnablementCases.some(
+      (item) => item.policyOverrides.errors === "codes-only" && !item.expected.pairEnabled,
+    ),
+    "no policyEnablementCases entry pins codes-only as a disabled mode",
+  );
+
   // --- semantic case structure plus the executable subset -----------------
   const pairs = new Map();
   for (const item of fixture.semanticCases) {
@@ -955,6 +1038,7 @@ export async function validateRedactionFixture() {
     pointerCases: fixture.pointerCases.length,
     wireCases: fixture.wireCases.length,
     flowCases: fixture.flowCases.length,
+    policyEnablementCases: fixture.policyEnablementCases.length,
     semanticPairs: pairs.size,
     executedSemanticCases: limitCasesExecuted + 2,
     dispositionChecks,

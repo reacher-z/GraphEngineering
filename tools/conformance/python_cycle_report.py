@@ -6,6 +6,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -43,20 +44,36 @@ RESOLUTION_AT = CHECKPOINT_AT
 
 
 def _inline(handler: Callable[[Any], Any]) -> Callable[[Any], Awaitable[Any]]:
-    """Dispatch a campaign handler inline on the event loop.
+    """Wrap a campaign handler in a coroutine that runs it in one loop step.
 
-    The controller offloads a plain synchronous handler to `asyncio.to_thread`,
-    and that thread hop races the binding's wall-clock `timeoutMs` (100 ms in
-    this campaign) whenever the host is loaded, aborting an attempt this
-    campaign never intends to time out. A coroutine handler runs to completion
-    in its first loop step, so the timer can never preempt it -- which is how
-    the TypeScript reference controller executes the same handlers.
+    Historically this wrapper was load-robustness: the controller offloaded a
+    plain synchronous handler to `asyncio.to_thread`, and that thread hop
+    raced the binding's wall-clock `timeoutMs` under host load. The
+    D8-CYCLE-TIMEOUT-DIVERGENCE-090 resolution retired the offload — the
+    controller now dispatches a non-coroutine handler inline on the event
+    loop, timeout-exempt by construction, exactly like TypeScript — so the
+    wrapper is no longer required for determinism. It is retained to keep the
+    long-standing campaign byte-stable; `_sync_timeout_exempt_report` below
+    exercises the bare synchronous dispatch path deliberately.
     """
 
     async def invoke(context: Any) -> Any:
         return handler(context)
 
     return invoke
+
+
+_SYNC_BUSY_ITERATIONS = 1_000_000
+_SYNC_BUSY_MODULUS = 1_000_003
+
+
+def _sync_busy_checksum() -> int:
+    """Deterministic bounded arithmetic busy work shared with the TS campaign."""
+
+    acc = 0
+    for index in range(_SYNC_BUSY_ITERATIONS):
+        acc = (acc * 31 + index) % _SYNC_BUSY_MODULUS
+    return acc
 
 
 def _request(graph_hash: str) -> dict[str, Any]:
@@ -407,6 +424,77 @@ async def _mode_report(
         inputs=inputs,
         checkpoint_id=f"cycle-cross-language-{suffix}-terminal",
     )
+
+
+async def _sync_timeout_exempt_report(graph_hash: str) -> dict[str, Any]:
+    """D8-CYCLE-TIMEOUT-DIVERGENCE-090 resolution case.
+
+    The finder and evaluator are deliberately plain synchronous handlers, not
+    `_inline` coroutines, and the finder busy-loops for longer than the 1 ms
+    `timeoutMs` its binding carries (deterministic bounded arithmetic, no
+    wall-clock sleeps). Under the resolved semantics a synchronous handler is
+    dispatched inline and is timeout-exempt by construction in both runtimes,
+    so this case is load-immune by design: load can only slow the busy loop,
+    and a slower inline handler still cannot be preempted by the timer. Both
+    runtimes compute the report natively; neither imports the other's
+    expectations.
+    """
+
+    request = _request(graph_hash)
+    request["controllerRunId"] = "cycle-cross-language-sync-exempt"
+    request["controllerId"] = "cycle-cross-language-sync-exempt-controller"
+    request["hostRun"]["runId"] = "cycle-cross-language-sync-exempt-host"
+    request["eventStreamId"] = "cycle-cross-language-sync-exempt.events"
+    request["checkpointScope"] = "cycle-cross-language-sync-exempt.checkpoints"
+    request["policy"]["maxIterations"] = 1
+    request["activities"]["finder"]["sideEffects"] = "idempotent"
+    request["activities"]["finder"]["timeoutMs"] = 1
+    inputs: list[dict[str, Any]] = []
+    elapsed_ms = 0.0
+    checksum = 0
+
+    def finder(context: CycleActivityContext) -> list[dict[str, Any]]:
+        nonlocal elapsed_ms, checksum
+        inputs.append(
+            {"phase": context.phase.value, "iteration": context.iteration, "input": context.input}
+        )
+        begin = time.perf_counter()
+        checksum = _sync_busy_checksum()
+        elapsed_ms = (time.perf_counter() - begin) * 1000
+        return [{"key": f"busy-{checksum}", "value": {"checksum": checksum}}]
+
+    def evaluator(context: CycleActivityContext) -> list[dict[str, str]]:
+        inputs.append(
+            {"phase": context.phase.value, "iteration": context.iteration, "input": context.input}
+        )
+        candidates = cast(list[dict[str, Any]], cast(dict[str, Any], context.input)["candidates"])
+        return [{"key": candidate["key"], "verdict": "reject"} for candidate in candidates]
+
+    sync_lease = _lease()
+    sync_lease["leaseId"] = "cycle-cross-language-sync-exempt-lease"
+    result = await start_cycle(
+        request,
+        CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+        store=MemoryCycleStore(),
+        lease=sync_lease,
+        clock=lambda: STARTED_AT,
+    )
+    assert elapsed_ms > 1, "busy work must exceed the 1 ms timeoutMs"
+    assert result.result["exitReason"] == "MAX_ITERATIONS"
+    assert not any(event.type == "ActivityFailed" for event in result.events)
+    projection = _event_projection(
+        result,
+        inputs=inputs,
+        checkpoint_id="cycle-cross-language-sync-exempt-terminal",
+    )
+    in_doubt = cast(
+        list[dict[str, Any]],
+        cast(dict[str, Any], projection["checkpoint"])["state"]["inDoubtActivities"],
+    )
+    assert in_doubt == []
+    projection["inDoubtActivities"] = in_doubt
+    projection["checksum"] = checksum
+    return projection
 
 
 async def _in_doubt_report(
@@ -1094,6 +1182,7 @@ async def _main() -> None:
             "recovered": await _in_doubt_report(graph.graph_hash, exhausted=False),
             "exhausted": await _in_doubt_report(graph.graph_hash, exhausted=True),
         },
+        "syncTimeoutExempt": await _sync_timeout_exempt_report(graph.graph_hash),
         "resolution": await _resolution_report(graph.graph_hash),
         "leaseFaultCampaign": await _lease_fault_campaign(
             graph.graph_hash,

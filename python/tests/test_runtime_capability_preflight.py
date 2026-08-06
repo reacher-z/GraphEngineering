@@ -18,6 +18,7 @@ from graph_engineering import (
     run_graph,
     start_graph_run,
 )
+from graph_engineering.integrated_barrier import claims_integrated_barrier_policy
 from graph_engineering.models import JsonValue
 from graph_engineering.redaction.guard import PreparedSinkWrite
 from tests.durable_support import memory_journal, memory_protection
@@ -181,6 +182,13 @@ def assert_literal_corpus_failure(result: Any, case: dict[str, Any]) -> None:
     assert all(failure.attempt == 0 for failure in result.failures)
 
 
+def _claims_integrated_barrier(graph: dict[str, Any]) -> bool:
+    return any(
+        node["kind"] == "barrier" and claims_integrated_barrier_policy(node["config"])
+        for node in graph["nodes"]
+    )
+
+
 @pytest.mark.parametrize(
     "case",
     CAPABILITY_CORPUS["cases"],
@@ -195,14 +203,33 @@ def test_ordinary_runtime_consumes_capability_corpus_literally(case: dict[str, A
         calls.append(context.node.id)
         return context.input
 
+    claimed = _claims_integrated_barrier(case["graph"])
     handlers = (
         {node["id"]: handler for node in case["graph"]["nodes"] if node["kind"] != "barrier"}
-        if case["expect"]["supported"]
+        if case["expect"]["supported"] or claimed
         else {"*": handler}
     )
     result = asyncio.run(run_graph(compile_graph(case["graph"]), {}, handlers))
 
-    if case["expect"]["supported"]:
+    if claimed:
+        # The corpus refusal belongs to the entry points that do not implement
+        # barrier satisfaction (pinned by the durable test below). The ordinary
+        # scheduler executes the integrated barrier itself with zero executor
+        # attempts, so it must not report the capability failure.
+        assert not case["expect"]["supported"]
+        assert not any(
+            failure.code is FailureCode.UNSUPPORTED_RUNTIME_CAPABILITY
+            for failure in result.failures
+        )
+        assert result.status is RunStatus.SUCCEEDED
+        assert calls == [
+            node["id"] for node in case["graph"]["nodes"] if node["kind"] != "barrier"
+        ]
+        for node in case["graph"]["nodes"]:
+            if node["kind"] == "barrier":
+                assert result.nodes[node["id"]].attempts == 0
+        assert result.decision_events != ()
+    elif case["expect"]["supported"]:
         assert result.status is RunStatus.SUCCEEDED
         assert result.failures == ()
         assert calls == [node["id"] for node in case["graph"]["nodes"] if node["kind"] != "barrier"]

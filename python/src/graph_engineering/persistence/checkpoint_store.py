@@ -183,7 +183,20 @@ def _summary(checkpoint: StoredCheckpoint) -> CheckpointSummary:
 
 
 class FileCheckpointStore:
-    """Atomic, content-verified checkpoints for one coordinating process."""
+    """Atomic, content-verified checkpoints for one coordinating process.
+
+    Documented limitation: ``save`` persists the caller-supplied ``state``
+    verbatim — plaintext application values reach the temporary and final
+    ``checkpoints/v1alpha1`` files.  ``spec/redaction-semantics.md`` treats such
+    content as legacy-inline data (Section 6.2).  For a write path where every
+    application value is a checkpoint-bound protected reference and no
+    plaintext byte ever reaches a temporary or final file, use
+    :class:`~graph_engineering.persistence.protected_checkpoint.GuardedFileCheckpointStore`
+    together with
+    :class:`~graph_engineering.persistence.protected_checkpoint.ProtectedCheckpointWriter`
+    (``checkpoints/v1alpha2``), which accept only guard-minted
+    ``PreparedSinkWrite`` capabilities.
+    """
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
         self.root = Path(root).resolve()

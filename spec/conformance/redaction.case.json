@@ -239,6 +239,12 @@
     { "id": "flow-unknown-sink-denied", "sourceClass": "graph-input", "sink": "future-sink", "policyControl": "events", "knownSource": true, "knownSink": false, "knownControl": true, "policyEnabled": true, "expected": { "outcome": "failed", "writeAuthorized": false, "code": "REDACTION_POLICY_INVALID" } },
     { "id": "flow-unknown-control-denied", "sourceClass": "graph-input", "sink": "event-journal", "policyControl": "futureControl", "knownSource": true, "knownSink": true, "knownControl": false, "policyEnabled": true, "expected": { "outcome": "failed", "writeAuthorized": false, "code": "REDACTION_POLICY_INVALID" } }
   ],
+  "policyEnablementCases": [
+    { "id": "enablement-default-profile-no-evidence", "sourceClass": "exception-message", "sink": "event-journal", "policyOverrides": {}, "expected": { "pairEnabled": false, "evidenceAuthorized": false, "nodeAttemptFailedDisposition": "metadata-only" } },
+    { "id": "enablement-protected-evidence-alone", "sourceClass": "exception-message", "sink": "event-journal", "policyOverrides": { "errors": "protected-evidence" }, "expected": { "pairEnabled": true, "evidenceAuthorized": true, "nodeAttemptFailedDisposition": "protected-ref" } },
+    { "id": "enablement-codes-only-disabled", "sourceClass": "exception-message", "sink": "event-journal", "policyOverrides": { "errors": "codes-only" }, "expected": { "pairEnabled": false, "evidenceAuthorized": false, "nodeAttemptFailedDisposition": "metadata-only" } },
+    { "id": "enablement-events-widening-is-not-evidence", "sourceClass": "exception-message", "sink": "event-journal", "policyOverrides": { "events": "allow-redacted" }, "expected": { "pairEnabled": true, "evidenceAuthorized": false, "nodeAttemptFailedDisposition": "metadata-only" } }
+  ],
   "wireCases": [
     {
       "id": "policy-default-valid",

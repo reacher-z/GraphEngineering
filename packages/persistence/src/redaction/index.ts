@@ -65,7 +65,6 @@ export {
 export { canonicalTagged, encodeDurableJson, type DurableJson } from "./durable-json.js";
 export { FileProtectedPayloadStore, type FileProtectedPayloadStoreOptions } from "./file-protected-store.js";
 export {
-  defaultPolicyEnabled,
   evaluateFlow,
   type FlowDecision,
   type FlowOutcome,
@@ -76,6 +75,7 @@ export {
   SinkGuard,
   consumePreparedSinkWrite,
   controlEnabled,
+  policyEnabledFor,
   PreparedSinkWrite,
   type AuthorityClass,
   type ConsumeResult,
@@ -164,6 +164,17 @@ export {
   type ProtectedValueRef,
   type SemanticContext,
 } from "./protected-store.js";
+export {
+  CHECKPOINT_SOURCE_CLASS,
+  prepareProtectedCheckpoint,
+  ProtectedCheckpointReader,
+  type CheckpointFailureCode,
+  type GuardedCheckpointSink,
+  type ProtectedCheckpointNodeSpec,
+  type ProtectedCheckpointReaderOptions,
+  type ProtectedCheckpointReadResult,
+  type ProtectedCheckpointSpec,
+} from "./protected-checkpoint-writer.js";
 export {
   NEVER_REDACTABLE_SINKS,
   NEVER_REDACTABLE_SOURCE_CLASSES,

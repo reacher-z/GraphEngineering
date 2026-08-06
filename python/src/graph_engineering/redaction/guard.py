@@ -19,6 +19,7 @@ returns a partly transformed object, and never uses ``None`` as failure.
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -63,6 +64,7 @@ from .protect import (
     ProtectedPayloadStore,
     ProtectedValueRef,
     authority_binding_hash,
+    deterministic_reference_id,
     key_ref_hash,
     protect_value,
     tenant_scope_hash,
@@ -219,6 +221,24 @@ class OccurrenceContext:
 
 
 @dataclass(frozen=True, slots=True)
+class GuardPayloadField:
+    """One authoritative application value bound to the field receiving its ref.
+
+    The TypeScript lane's ``GuardPayloadField`` verbatim: ``field_path`` is the
+    RFC 6901 pointer to the member of the final record that will hold the
+    protected reference, ``mac_field_path`` optionally names the adjacent
+    ``*Mac`` member (Section 6.1 requires it to equal ``valueMac``), and
+    ``value`` is the raw application value, which is snapshotted and never
+    serialized inline.
+    """
+
+    field_path: str
+    semantic_context: Mapping[str, JsonValue]
+    value: object
+    mac_field_path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SinkWriteRequest:
     """One candidate write.
 
@@ -250,6 +270,18 @@ class SinkWriteRequest:
     #: divergence that made the Python guard accept writes the TypeScript guard
     #: refused.
     policy_control: str | None = None
+    #: Multi-payload records (the ``checkpoints/v1alpha2`` projection). Each
+    #: field carries its own pointer, semantic context, and raw value, exactly
+    #: like the TypeScript guard's ``payloads``. Mutually exclusive with the
+    #: single ``payload``/``semantic_context``/``mac_field_path`` members.
+    payloads: tuple[GuardPayloadField, ...] = ()
+    #: Optional RFC 6901 pointer at which the guard writes the Section 6.2
+    #: record content hash: SHA-256 of canonical UTF-8 JSON of the entire
+    #: closed record with only this member omitted. Guard-owned finalization
+    #: for the same reason ``payload_hash_field`` is: the hash must cover the
+    #: placed protected references, which only exist after the guard's own
+    #: transform.
+    content_hash_field: str | None = None
 
     @property
     def has_payload(self) -> bool:
@@ -557,6 +589,23 @@ class SinkGuard:
                 failure("PAYLOAD_PROTECTION_REQUIRED", "classification"),
             )
 
+        if request.payloads:
+            # A multi-payload record mixes with neither the single-payload form
+            # nor a redacted derivative (Section 3.2).
+            if request.has_payload or request.semantic_context is not None:
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("REDACTION_POLICY_INVALID", "classification"),
+                )
+            if flow.outcome != "protected-ref":
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("PAYLOAD_PROTECTION_REQUIRED", "classification"),
+                )
+            return self._prepare_protected_many(request, decision_id, metadata_snapshot)
+
         if flow.outcome == "metadata-only":
             return self._prepare_metadata_only(request, decision_id, metadata_snapshot)
 
@@ -729,6 +778,191 @@ class SinkGuard:
             safe_orphans=(protection.reference,),
         )
 
+    def _prepare_protected_many(
+        self,
+        request: SinkWriteRequest,
+        decision_id: str,
+        metadata: dict[str, JsonValue],
+    ) -> GuardOutcome:
+        """Protect every payload field of one multi-payload record.
+
+        The TypeScript guard's multi-payload branch verbatim, plus the
+        deterministic reference derivation both lanes share:
+        ``pv_`` + HMAC(identityKey, canonicalTagged(["protected-ref/v1alpha1",
+        aadHash, ciphertextHash]))[:26], so identical inputs under the
+        deterministic test provider produce byte-identical records.
+        """
+
+        import dataclasses
+
+        if self._store is None or self._key_provider is None:
+            # Section 4.2: fail before the first checkpoint byte, temporary
+            # plaintext file, or executor invocation. Never fall back to inline.
+            return self._failed(
+                request,
+                decision_id,
+                failure("PAYLOAD_PROTECTION_REQUIRED", "policy"),
+            )
+        if len(request.payloads) > self._limits.max_protected_refs_per_record:
+            return self._failed(
+                request,
+                decision_id,
+                failure("PAYLOAD_PROTECTION_FAILED", "canonicalize"),
+            )
+
+        occurrence = request.occurrence
+        identity_key = self._key_provider.run_identity_key(occurrence.run_id)
+        tenant = tenant_scope_hash(identity_key, self._tenant_scope_id)
+        reference_key_hash = key_ref_hash(self._key_provider.key_ref)
+        authority = authority_binding_hash(
+            identity_key,
+            authority_provider_id=self._authority_provider_id,
+            authority_subject_id=self._authority_subject_id,
+            tenant_scope=tenant,
+            run_id=occurrence.run_id,
+            capture_policy_hash=self._policy_hash,
+            key_reference_hash=reference_key_hash,
+        )
+
+        document = dict(metadata)
+        refs: list[ProtectedValueRef] = []
+        for field_spec in request.payloads:
+            for pointer in (field_spec.field_path, field_spec.mac_field_path):
+                if pointer is None:
+                    continue
+                try:
+                    decode_pointer(pointer, limits=self._limits)
+                except PointerSyntaxError:
+                    return self._failed(
+                        request,
+                        decision_id,
+                        failure(
+                            "REDACTION_POLICY_INVALID", "classification", field="fieldPath"
+                        ),
+                        safe_orphans=tuple(refs),
+                    )
+            try:
+                snapshot, _ = portable_snapshot(field_spec.value, limits=self._limits)
+            except SnapshotKeyCollisionError:
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("REDACTION_RECEIPT_INVALID", "snapshot"),
+                    safe_orphans=tuple(refs),
+                )
+            except SnapshotError:
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("PAYLOAD_PROTECTION_FAILED", "snapshot"),
+                    safe_orphans=tuple(refs),
+                )
+            # Section 7.1: never re-transform an already transformed value.
+            if contains_transformed_material(snapshot):
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("PAYLOAD_PROTECTION_FAILED", "snapshot"),
+                    safe_orphans=tuple(refs),
+                )
+
+            mac = value_mac(identity_key, field_spec.semantic_context, snapshot)
+            aad = ProtectedAad(
+                run_id=occurrence.run_id,
+                graph_revision=occurrence.graph_revision,
+                record_kind=occurrence.record_kind,
+                record_type=occurrence.record_type,
+                sequence=occurrence.sequence,
+                field_path=field_spec.field_path,
+                capture_policy_hash=self._policy_hash,
+                key_ref_hash=reference_key_hash,
+                authority_binding_hash=authority,
+                tenant_scope_hash=tenant,
+                value_mac=mac,
+                event_id=(
+                    occurrence.occurrence_id if occurrence.record_kind == "event" else None
+                ),
+                checkpoint_id=(
+                    occurrence.occurrence_id
+                    if occurrence.record_kind == "checkpoint"
+                    else None
+                ),
+                node_id=occurrence.node_id,
+                edge_id=occurrence.edge_id,
+                attempt=occurrence.attempt,
+            )
+            injected = self._probe("protect")
+            if injected is not None:
+                return self._failed(request, decision_id, injected, safe_orphans=tuple(refs))
+            protection = protect_value(
+                snapshot,
+                aad=aad,
+                key_provider=self._key_provider,
+                protector=self._protector,
+            )
+            if isinstance(protection, RedactionFailure):
+                return self._failed(request, decision_id, protection, safe_orphans=tuple(refs))
+            reference = dataclasses.replace(
+                protection.reference,
+                ref=deterministic_reference_id(
+                    identity_key,
+                    aad_hash=protection.reference.aad_hash,
+                    ciphertext_hash=protection.reference.ciphertext_hash,
+                ),
+            )
+
+            injected = self._probe("atomic-publish")
+            if injected is not None:
+                return self._failed(request, decision_id, injected, safe_orphans=tuple(refs))
+            try:
+                self._store.put(reference, protection.blob_bytes)
+            except Exception:
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("PAYLOAD_PROTECTION_FAILED", "atomic-publish"),
+                    safe_orphans=tuple(refs),
+                )
+            refs.append(reference)
+
+            if not _insert_at_pointer(
+                document, field_spec.field_path, reference.as_document()
+            ):
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("PAYLOAD_PROTECTION_FAILED", "canonicalize", field="fieldPath"),
+                    safe_orphans=tuple(refs),
+                )
+            if field_spec.mac_field_path is not None and not _insert_at_pointer(
+                document, field_spec.mac_field_path, mac
+            ):
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("PAYLOAD_PROTECTION_FAILED", "canonicalize", field="fieldPath"),
+                    safe_orphans=tuple(refs),
+                )
+            # Section 3.2: plaintext beside the reference is invalid.
+            if _contains_payload_bytes(
+                _reference_container(metadata, field_spec.field_path), snapshot
+            ):
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("PAYLOAD_PROTECTION_REQUIRED", "classification"),
+                    safe_orphans=tuple(refs),
+                )
+
+        return self._finalize(
+            request,
+            decision_id,
+            document,
+            "protected-ref",
+            protected_refs=tuple(refs),
+            safe_orphans=tuple(refs),
+        )
+
     def _prepare_redacted(
         self,
         request: SinkWriteRequest,
@@ -844,6 +1078,20 @@ class SinkGuard:
                     request,
                     decision_id,
                     failure("PAYLOAD_PROTECTION_FAILED", "canonicalize", field="payloadHash"),
+                    safe_orphans=safe_orphans,
+                )
+
+        if request.content_hash_field is not None:
+            # Section 6.2: SHA-256 of canonical UTF-8 JSON of the entire closed
+            # record with only the content-hash member omitted. The metadata
+            # already carries the disposition facts, so the covered set matches
+            # the TypeScript guard byte for byte.
+            digest = hashlib.sha256(canonical_bytes(document)).hexdigest()
+            if not _insert_at_pointer(document, request.content_hash_field, digest):
+                return self._failed(
+                    request,
+                    decision_id,
+                    failure("PAYLOAD_PROTECTION_FAILED", "canonicalize", field="contentHash"),
                     safe_orphans=safe_orphans,
                 )
 
@@ -965,11 +1213,17 @@ class SinkGuard:
         )
 
 
+_ARRAY_INDEX: Final = re.compile(r"^(?:0|[1-9][0-9]*)$")
+
+
 def _insert_at_pointer(document: dict[str, JsonValue], pointer: str, value: JsonValue) -> bool:
     """Place one value at an RFC 6901 pointer inside the record envelope.
 
     Only a fresh object member may be created: overwriting an existing member
     would let a caller pre-place plaintext and have the guard bless it.
+    An intermediate array token must be canonical and address an existing
+    element, and the leaf can never be an array element — the exact
+    ``defineAtPointer`` rules of the TypeScript guard.
     """
 
     try:
@@ -978,6 +1232,14 @@ def _insert_at_pointer(document: dict[str, JsonValue], pointer: str, value: Json
         return False
     current: JsonValue = document
     for token in tokens[:-1]:
+        if type(current) is list:
+            if _ARRAY_INDEX.fullmatch(token) is None:
+                return False
+            index = int(token)
+            if index >= len(current):
+                return False
+            current = current[index]
+            continue
         if type(current) is not dict:
             return False
         assert isinstance(current, dict)
@@ -1030,6 +1292,11 @@ def _reference_container(
         return metadata
     current: JsonValue = dict(metadata)
     for token in tokens[:-1]:
+        if type(current) is list:
+            if _ARRAY_INDEX.fullmatch(token) is None or int(token) >= len(current):
+                return metadata
+            current = current[int(token)]
+            continue
         if type(current) is not dict or token not in current:
             return metadata
         current = current[token]

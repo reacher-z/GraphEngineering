@@ -10,6 +10,7 @@ from .checkpoint_store import (
     StoredCheckpoint,
 )
 from .errors import (
+    CheckpointProtectionRequiredError,
     CorruptCheckpointError,
     CorruptEventLogError,
     PersistenceError,
@@ -22,6 +23,16 @@ from .errors import (
 )
 from .event_store import EventStore, JsonlEventStore, MemoryEventStore
 from .identifiers import assert_safe_identifier, identifier_hash
+from .protected_checkpoint import (
+    CHECKPOINT_PROJECTION_TYPE,
+    CHECKPOINT_V1ALPHA2_API_VERSION,
+    CheckpointNodeSpec,
+    GuardedFileCheckpointStore,
+    ProtectedCheckpointSpec,
+    ProtectedCheckpointWriter,
+    prepare_protected_checkpoint,
+    resolve_protected_checkpoint_value,
+)
 from .protected_journal import (
     GuardedJsonlEventStore,
     GuardedMemoryEventStore,
@@ -32,14 +43,19 @@ from .protected_journal import (
 
 __all__ = [
     "CHECKPOINT_API_VERSION",
+    "CHECKPOINT_PROJECTION_TYPE",
+    "CHECKPOINT_V1ALPHA2_API_VERSION",
     "MAX_SAFE_INTEGER",
     "CheckpointInput",
+    "CheckpointNodeSpec",
+    "CheckpointProtectionRequiredError",
     "CheckpointStore",
     "CheckpointSummary",
     "CorruptCheckpointError",
     "CorruptEventLogError",
     "EventStore",
     "FileCheckpointStore",
+    "GuardedFileCheckpointStore",
     "GuardedJsonlEventStore",
     "GuardedMemoryEventStore",
     "JsonlEventStore",
@@ -48,6 +64,8 @@ __all__ = [
     "PersistenceErrorCode",
     "PersistenceIOError",
     "PersistenceValidationError",
+    "ProtectedCheckpointSpec",
+    "ProtectedCheckpointWriter",
     "ProtectedEventJournal",
     "ProtectedEventStore",
     "StoredCheckpoint",
@@ -57,4 +75,6 @@ __all__ = [
     "VersionConflictError",
     "assert_safe_identifier",
     "identifier_hash",
+    "prepare_protected_checkpoint",
+    "resolve_protected_checkpoint_value",
 ]

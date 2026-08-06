@@ -1437,6 +1437,48 @@ describe("native bounded cycle controller", () => {
     },
   );
 
+  it("dispatches a synchronous handler inline so it is timeout-exempt by construction", async () => {
+    // D8-CYCLE-TIMEOUT-DIVERGENCE-090 resolution: a synchronous handler
+    // settles in a microtask and the attempt timer is a macrotask, so the
+    // timer can never fire against it — at any load and at any timeoutMs.
+    // The busy loop is deterministic bounded arithmetic (no wall-clock
+    // sleeps) that takes well over the 1 ms timeoutMs, and load can only make
+    // it slower, so this pin is load-immune by design.
+    const base = request("until-dry", { maxIterations: 1 });
+    const mutable = JSON.parse(JSON.stringify(base)) as CycleControllerRequest;
+    const finderBinding = mutable.activities.finder as {
+      sideEffects: CycleActivityBinding["sideEffects"];
+      timeoutMs: number;
+    };
+    finderBinding.sideEffects = "idempotent";
+    finderBinding.timeoutMs = 1;
+    const item = validateCycleControllerRequest(mutable);
+    const store = new MemoryCycleControllerEventStore();
+    let elapsedMs = 0;
+    const finder = () => {
+      const begin = performance.now();
+      let acc = 0;
+      for (let index = 0; index < 1_000_000; index += 1) acc = (acc * 31 + index) % 1_000_003;
+      elapsedMs = performance.now() - begin;
+      return { output: [{ key: `busy-${acc}`, value: { checksum: acc } }] };
+    };
+    const evaluator = ({ input }: { input: unknown }) => {
+      const candidates = (input as { candidates: { key: string }[] }).candidates;
+      return { output: candidates.map(({ key }) => ({ key, verdict: "reject" as const })) };
+    };
+    const result = await startCycleController(item, graph(), {
+      eventStore: store, lease: lease(), now: fixedNow(),
+      activities: { finder, candidateEvaluator: evaluator },
+    });
+    expect(elapsedMs).toBeGreaterThan(1);
+    expect(result).toMatchObject({ exitReason: "MAX_ITERATIONS", seenCount: 1 });
+    const types = events(store, item).map(({ type }) => type);
+    expect(types).toContain("DiscoveryCommitted");
+    expect(types).not.toContain("ActivityFailed");
+    const fold = await replayCycleController(store, item.eventStreamId);
+    expect(fold.inDoubtActivities).toEqual([]);
+  });
+
   it("rejects stale lease reacquisition before CAS and terminal resume dispatches nothing", async () => {
     const item = request("until-dry", { maxIterations: 1 });
     const crashed = new CommitThenThrowCycleStore("RoundReserved");

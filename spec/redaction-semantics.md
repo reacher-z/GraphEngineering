@@ -87,7 +87,9 @@ all fourteen schemas, every `wireCases` document against its named schema, the
 complete RFC 6901 pointer transform over every `pointerCases` entry, the
 disposition truth table, receipt pointer ordering/count/crossing rules, AAD
 record-kind relations, adjacent MAC equality, policy/rule consistency, the
-deterministic source×sink join over every `flowCases` entry, and
+deterministic source×sink join over every `flowCases` entry, the Section
+1.2 widening / Section 6.1 protected-evidence recomputation over every
+`policyEnablementCases` entry, and
 inventory/Cartesian completeness against the closed enums. What it does not yet
 enforce: the general `semanticCases` mutation oracle described in Section 12.
 Twenty-six of the 106 cases run today; the other eighty declare symbolic
@@ -202,6 +204,22 @@ binds 57 source rows, 54 sink rows, and the complete 3,078-pair Cartesian
 domain, with positive and denial examples for each of 18 destination families.
 Adding or removing an enum without updating its one classification row, one
 sink row, counts, and evaluator corpus is a conformance failure.
+
+A classified pair outside the default matrix — a sink row whose
+`defaultEnabled` is false, or a source row whose `defaultAction` is `off` — is
+enabled only when the effective policy explicitly widens it. Explicit widening
+is evaluated over the union of the source row's `policyControl` and every
+control named by the sink row: the pair is widened exactly when at least one
+control in that union selects a mode different from the Section 4.1 default
+stable profile. Enablement then still requires every control in that union to
+be enabled, where `off` and `codes-only` are disabled modes and the `deny`
+pseudo-control is never enabled. `errors: "codes-only"` therefore never
+enables a payload representation: codes-only means stable codes only, with no
+payload evidence in any form. This widening rule is the Section 1.2 gate, not
+a representation grant. Section 6.1 remains stricter for `NodeAttemptFailed`
+raw diagnostic evidence, which additionally requires the `errors` control
+itself to select `protected-evidence`; widening an unrelated control (for
+example `events`) does not by itself authorize evidence capture.
 
 `process-environment` and `secret-value` use the `deny` control and cannot be
 enabled in this version. Caller-controlled identifiers are never silently
@@ -953,7 +971,11 @@ templates by stable code; they are not substrings of caught exceptions.
 Host-specific cause names are omitted unless mapped through a closed safe
 allowlist. Raw errors, stack traces, provider responses, prompts, paths, and
 tool output are absent. Explicit raw diagnostic evidence uses a protected ref
-and is never scheduler authority.
+and is never scheduler authority. "Explicit protected-evidence policy" means
+the `errors` control selects the `protected-evidence` mode of Section 4.1 and
+the `exception-message`/event-sink pair is enabled under the Section 1.2
+widening formula; no other control's widening substitutes for the `errors`
+mode.
 
 Future event types—including graph patches, routes, barriers, verification,
 budgets, artifacts, and human decisions—inherit this contract. A reserved event

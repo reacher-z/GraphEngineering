@@ -403,7 +403,7 @@ POLICY_BEARING_BARRIERS = tuple(
 
 def _capability_message(path: str) -> str:
     return (
-        f"Runtime capability 'node-config:barrier' at '{path}' "
+        f"Runtime capability 'integrated-barrier-policy' at '{path}' "
         "is not implemented by runtime-capability/v1alpha1"
     )
 
@@ -436,7 +436,16 @@ class NoIoEventStore:
         raise AssertionError(f"unexpected legacy history probe for {run_id!r}")
 
 
-def test_exact_policy_barriers_are_refused_before_dispatch_with_no_side_effect() -> None:
+def test_exact_policy_barriers_execute_ordinarily_and_are_refused_durably() -> None:
+    """The pre-dispatch refusal now belongs only to the durable lane.
+
+    The ordinary scheduler implements integrated barrier execution, so it
+    decides an exact policy itself with zero executor attempts and never
+    reaches a barrier handler. The durable scheduler does not journal
+    ``BarrierSatisfied`` yet, so it keeps refusing under the
+    ``integrated-barrier-policy`` capability in node declaration order.
+    """
+
     assert len(POLICY_BEARING_BARRIERS) == 3
     for _, node_id in POLICY_BEARING_BARRIERS:
         config = next(
@@ -446,33 +455,65 @@ def test_exact_policy_barriers_are_refused_before_dispatch_with_no_side_effect()
         )
         assert validate_integrated_barrier_policy(config).valid is True
 
-    calls: list[str] = []
+    barrier_calls: list[str] = []
 
     def handler(context: NodeContext) -> Any:
-        calls.append(context.node.id)
+        if context.node.kind == "barrier":
+            barrier_calls.append(context.node.id)
         return context.input
 
     compiled = compile_graph(POLICY_BEARING_CASE["graph"])
-    result = asyncio.run(run_graph(compiled, {}, {"*": handler}))
+    ordinary = asyncio.run(run_graph(compiled, {}, {"*": handler}))
+    assert barrier_calls == []
+    assert not any(
+        failure.code is FailureCode.UNSUPPORTED_RUNTIME_CAPABILITY
+        for failure in ordinary.failures
+    )
+    # Every barrier was decided by the scheduler, never by an executor: zero
+    # attempts, except the malformed-vote quorum failure's exactly-one attempt.
+    for _, node_id in POLICY_BEARING_BARRIERS:
+        assert ordinary.nodes[node_id].attempts <= 1
 
-    assert result.status is RunStatus.FAILED
-    assert [failure.code for failure in result.failures] == [
-        FailureCode.UNSUPPORTED_RUNTIME_CAPABILITY
-    ] * 3
-    # Grouped in node declaration order.
-    assert [failure.node_id for failure in result.failures] == [
-        node_id for _, node_id in POLICY_BEARING_BARRIERS
-    ]
-    assert [failure.message for failure in result.failures] == [
-        _capability_message(f"#/nodes/{index}/config") for index, _ in POLICY_BEARING_BARRIERS
-    ]
-    assert [failure.attempt for failure in result.failures] == [0, 0, 0]
-    assert calls == []
-    assert dict(result.nodes) == {}
-    assert result.outputs is None
-    assert result.scheduled_order == ()
-    assert result.completion_order == ()
-    assert result.total_attempts == 0
+    async def durable_scenario() -> None:
+        calls: list[str] = []
+
+        def durable_handler(context: NodeContext) -> Any:
+            calls.append(context.node.id)
+            return context.input
+
+        store = NoIoEventStore()
+        result = await start_graph_run(
+            compiled,
+            {},
+            {"*": durable_handler},
+            run_id="integrated-barrier-durable-refusal",
+            implementation_id="integrated-barrier@1",
+            event_store=store,
+            payload_protection=PROTECTION,
+        )
+        assert result.status is RunStatus.FAILED
+        assert [failure.code for failure in result.failures] == [
+            FailureCode.UNSUPPORTED_RUNTIME_CAPABILITY
+        ] * 3
+        # Grouped in node declaration order.
+        assert [failure.node_id for failure in result.failures] == [
+            node_id for _, node_id in POLICY_BEARING_BARRIERS
+        ]
+        assert [failure.message for failure in result.failures] == [
+            _capability_message(f"#/nodes/{index}/config")
+            for index, _ in POLICY_BEARING_BARRIERS
+        ]
+        assert [failure.attempt for failure in result.failures] == [0, 0, 0]
+        assert calls == []
+        assert dict(result.nodes) == {}
+        assert result.outputs is None
+        assert result.scheduled_order == ()
+        assert result.completion_order == ()
+        assert result.total_attempts == 0
+        assert store.read_calls == 0
+        assert store.append_calls == 0
+
+    asyncio.run(durable_scenario())
 
 
 def test_exact_policy_barriers_are_refused_with_zero_durable_store_io() -> None:

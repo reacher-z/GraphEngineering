@@ -30,13 +30,10 @@ import {
   SinkGuard,
   canonicalTagged,
   computeValueMac,
-  controlEnabled,
-  defaultPolicyEnabled,
   hmacSha256Hex,
   keyRefHash,
+  policyEnabledFor,
   prepareProtectedEvent,
-  sinkRow,
-  sourceRow,
   type AuthorityScope,
   type CapturePolicy,
   type CaptureSinkClass,
@@ -90,7 +87,7 @@ export interface DurablePayloadProtection {
 
 export interface DurablePayloadDraft {
   /** The `data` member that will hold the reference. */
-  readonly field: "inputRef" | "outputRef" | "resultRef" | "evidenceRef";
+  readonly field: "inputRef" | "outputRef" | "resultRef" | "evidenceRef" | "decisionRef";
   readonly semanticContext: SemanticContext;
   /** The raw application value. It never enters the candidate record. */
   readonly value: unknown;
@@ -142,41 +139,55 @@ const EVENT_SOURCE_CLASS: Readonly<Record<GraphEventV1Alpha2Type, CaptureSourceC
     NodeRetried: "runtime-generated-identifier",
     NodeSucceeded: "node-output",
     EdgeEmitted: "runtime-generated-identifier",
+    // The decision document is the barrier node's committed result — its bound
+    // output when satisfied — so it is classified by what the payload actually
+    // is, exactly as `NodeSettledWithoutAttempt` classifies its result.
+    BarrierSatisfied: "node-result",
     RunCancelled: "run-result",
     RunFailed: "run-result",
     RunSucceeded: "run-result",
   });
 
 /**
+ * The source class of one concrete draft. `exception-message` classifies the
+ * raw evidence payload, not the envelope: a `NodeAttemptFailed` record that
+ * carries no evidence holds only the closed metadata projection (stable codes,
+ * template identifiers, attempt counters), which is runtime-generated. Python's
+ * `_EventDraft` classifies the same two shapes the same way, so a policy that
+ * disables the `errors` control (for example `errors: "codes-only"`) still
+ * journals the metadata-only failure record in both lanes instead of refusing
+ * the whole event.
+ */
+function draftSourceClass(draft: DurableEventDraft): CaptureSourceClass {
+  if (draft.type === "NodeAttemptFailed" && (draft.payloads?.length ?? 0) === 0) {
+    return "runtime-generated-identifier";
+  }
+  return EVENT_SOURCE_CLASS[draft.type];
+}
+
+/**
  * Section 6.1: raw attempt-failure text is *explicit* protected diagnostic
- * evidence — "explicit raw diagnostic evidence uses a protected ref and is never
- * scheduler authority". `exception-message` has `defaultAction: "off"`, so under
- * the Section 4.1 default profile no evidence is captured at all and
- * `NodeAttemptFailed` is the metadata-only shape. An operator who widens the
- * sink's controls gets the protected shape.
+ * evidence — "optional raw `evidenceRef` / `evidenceMac` only under explicit
+ * protected-evidence policy". `exception-message` has `defaultAction: "off"`,
+ * so under the Section 4.1 default profile no evidence is captured at all and
+ * `NodeAttemptFailed` is the metadata-only shape. The one operator lever that
+ * flips it is `errors: "protected-evidence"` — the `errors` control is the
+ * `exception-message` *source* row's control, so widening a sink-side control
+ * such as `events` never substitutes for it.
  *
- * This is the whole disposition rule, and it is a pure function of the effective
- * policy and the journal sink, so both language lanes reach the same answer on
- * the same input. It is deliberately Python's `policy_enabled_for` formula
- * verbatim rather than this lane's more permissive `SinkGuard` rule: the
- * scheduler must never offer the guard a payload the other lane's guard would
- * refuse.
+ * This is the whole disposition rule, and it is a pure function of the
+ * effective policy and the journal sink, so both language lanes reach the same
+ * answer on the same input: the Section 6.1 mode gate above, intersected with
+ * the Section 1.2 pair enablement formula (`policyEnabledFor` here,
+ * `policy_enabled_for` in Python), whose explicit-widening test spans the union
+ * of the source row's control and the sink row's controls.
  */
 export function diagnosticEvidenceAuthorized(
   policy: CapturePolicy,
   sink: CaptureSinkClass,
 ): boolean {
-  const source = sourceRow("exception-message");
-  const destination = sinkRow(sink);
-  if (source === undefined || destination === undefined) return false;
-  const mode = (candidate: CapturePolicy, control: string): unknown =>
-    (candidate as unknown as Record<string, unknown>)[control];
-  const widened = destination.policyControls.some(
-    (control) => mode(policy, control) !== mode(DEFAULT_CAPTURE_POLICY, control),
-  );
-  if (!defaultPolicyEnabled("exception-message", sink) && !widened) return false;
-  if (!controlEnabled(policy, source.policyControl)) return false;
-  return destination.policyControls.every((control) => controlEnabled(policy, control));
+  if (policy.errors !== "protected-evidence") return false;
+  return policyEnabledFor(policy, "exception-message", sink);
 }
 
 const MAC_FIELD: Readonly<Record<DurablePayloadDraft["field"], string>> = Object.freeze({
@@ -184,6 +195,7 @@ const MAC_FIELD: Readonly<Record<DurablePayloadDraft["field"], string>> = Object
   outputRef: "outputMac",
   resultRef: "resultMac",
   evidenceRef: "evidenceMac",
+  decisionRef: "decisionMac",
 });
 
 /** Section 10 codes are portable; they surface as durable run error codes. */
@@ -412,7 +424,7 @@ export class ProtectedDurableRun {
         runId: this.runId,
         graphRevision: DURABLE_GRAPH_REVISION,
         sequence,
-        sourceClass: EVENT_SOURCE_CLASS[draft.type],
+        sourceClass: draftSourceClass(draft),
         data: draft.data,
         ...(draft.nodeId === undefined ? {} : { nodeId: draft.nodeId }),
         ...(draft.edgeId === undefined ? {} : { edgeId: draft.edgeId }),
@@ -482,6 +494,13 @@ export class ProtectedDurableRun {
           field: "resultRef",
           semanticContext: { kind: "node-result", runId, graphRevision, nodeId },
           target: "result",
+          tagged: true,
+        }];
+      case "BarrierSatisfied":
+        return [{
+          field: "decisionRef",
+          semanticContext: { kind: "node-result", runId, graphRevision, nodeId },
+          target: "decision",
           tagged: true,
         }];
       case "RunSucceeded":

@@ -1095,21 +1095,21 @@ def test_non_decision_events_are_ignored_by_the_fold() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_scheduler_still_refuses_a_policy_bearing_barrier_before_dispatch() -> None:
-    """This tranche does not lift the ``node-config:barrier`` preflight.
+def test_the_ordinary_scheduler_owns_the_decision_and_never_calls_a_barrier_handler() -> None:
+    """The ordinary scheduler now executes a policy-bearing barrier itself.
 
-    ``spec/runtime-capability-semantics.md`` states that each feature "must
-    replace its own rejection only after a versioned contract, both native
-    implementations, conformance evidence and durable recovery behavior are
-    accepted", and ``spec/conformance/runtime-capability.case.json`` freezes the
-    rejection. Replacing it is therefore a change to that contract, not to this
-    runtime, so the gate stays and the barrier engine is reached only through
-    the explicit API above. This test exists so the seam cannot move silently.
+    The pre-dispatch refusal moved to the lanes that still cannot execute the
+    contract: the durable entry points keep refusing under the
+    ``integrated-barrier-policy`` capability (pinned in
+    ``test_integrated_barrier_scheduler.py``), while the ordinary scheduler
+    decides the barrier with zero executor attempts. A registered barrier
+    handler is therefore never reached, so an exact policy can never be
+    silently executed as an identity transform.
     """
 
     import asyncio
 
-    from graph_engineering import FailureCode, RunStatus, compile_graph, run_graph
+    from graph_engineering import FailureCode, NodeStatus, compile_graph, run_graph
 
     case = next(
         item
@@ -1118,19 +1118,31 @@ def test_the_scheduler_still_refuses_a_policy_bearing_barrier_before_dispatch() 
     )
     barriers = [node["id"] for node in case["graph"]["nodes"] if node["kind"] == "barrier"]
     assert barriers
-    calls: list[str] = []
+    barrier_calls: list[str] = []
 
     def handler(context: Any) -> Any:
-        calls.append(context.node.id)
+        if context.node.kind == "barrier":
+            barrier_calls.append(context.node.id)
         return context.input
 
     result = asyncio.run(run_graph(compile_graph(case["graph"]), {}, {"*": handler}))
-    assert result.status is RunStatus.FAILED
-    assert [failure.code for failure in result.failures] == [
-        FailureCode.UNSUPPORTED_RUNTIME_CAPABILITY
-    ] * len(barriers)
-    assert calls == []
-    assert result.total_attempts == 0
+    assert barrier_calls == []
+    assert not any(
+        failure.code is FailureCode.UNSUPPORTED_RUNTIME_CAPABILITY
+        for failure in result.failures
+    )
+    # Both transforms succeed, so `all` and `percentage` are satisfied, while
+    # the quorum barrier received no ballot at all: a malformed vote fails the
+    # barrier non-retryably after exactly one attempt and is never coerced.
+    assert result.nodes["gate-all"].status is NodeStatus.SUCCEEDED
+    assert result.nodes["gate-all"].attempts == 0
+    assert result.nodes["gate-percentage"].status is NodeStatus.SUCCEEDED
+    quorum = result.nodes["gate-quorum"]
+    assert quorum.status is NodeStatus.FAILED
+    assert quorum.attempts == 1
+    assert quorum.failure is not None
+    assert quorum.failure.code is FailureCode.INVALID_BARRIER_VOTE
+    assert not quorum.failure.retryable
     # The engine in this module decides the same policies without the scheduler.
     for node in case["graph"]["nodes"]:
         if node["kind"] != "barrier":

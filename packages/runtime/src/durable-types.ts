@@ -1,7 +1,7 @@
 import type { GraphSpec, NodeKind, NodeSpec } from "@graph-engineering/core";
 import type { EventStore } from "@graph-engineering/persistence";
 import type { DurablePayloadProtection } from "./durable-protection.js";
-import type { GraphRunResult, JsonValue } from "./types.js";
+import type { GraphRunResult, JsonValue, MonotonicClock } from "./types.js";
 
 export type DurableRunErrorCode =
   | "RUN_NOT_FOUND"
@@ -14,6 +14,15 @@ export type DurableRunErrorCode =
   | "IN_DOUBT_SIDE_EFFECT"
   | "RESUME_CONFLICT"
   | "DURABILITY_STORE_FAILED"
+  /**
+   * A run outcome the frozen `events/v1alpha2` envelope cannot truthfully
+   * represent (an `unknown` run terminal, a node terminal outside
+   * succeeded/failed/skipped, a cancelled armed barrier, a malformed barrier
+   * vote). The journal fails closed instead of writing a record whose closed
+   * enums would misstate the outcome; the stream is left non-terminal and every
+   * event already appended remains true.
+   */
+  | "UNREPRESENTABLE_DURABLE_OUTCOME"
   // spec/redaction-semantics.md Section 10 portable failure codes.
   | "PAYLOAD_PROTECTION_REQUIRED"
   | "PAYLOAD_PROTECTION_FAILED"
@@ -104,6 +113,11 @@ export interface DurableSchedulerOptions {
   signal?: AbortSignal;
   now?: () => Date;
   createEventId?: (context: DurableEventIdContext) => string;
+  /**
+   * Injected monotonic barrier clock, forwarded to the scheduler. Defaults to
+   * the frozen clock, under which no barrier deadline can ever elapse.
+   */
+  clock?: MonotonicClock;
 }
 
 export type DurableGraphRunResult = GraphRunResult;

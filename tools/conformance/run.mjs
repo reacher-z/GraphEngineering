@@ -1903,6 +1903,112 @@ for (const field of [
 assert.deepEqual(tsCycleCheckpoint, pyCycleReport.checkpoint, "D7 checkpoint objects differ");
 assert.equal(tsCycleFold.terminalResult?.historyPrefixHash, tsCycleResult.historyPrefixHash);
 
+// D8-CYCLE-TIMEOUT-DIVERGENCE-090 resolution case: a deliberately synchronous
+// finder busy-loops for longer than its 1 ms `timeoutMs` (deterministic
+// bounded arithmetic, no wall-clock sleeps) and must yield the SAME verdict in
+// both runtimes — committed discovery, zero ActivityFailed, zero in-doubt —
+// because a synchronous handler is dispatched inline and is timeout-exempt by
+// construction. Load-immune by design: load only slows the busy loop, and a
+// slower inline handler still cannot be preempted by the attempt timer. Both
+// sides compute natively; neither imports the other's expectations.
+const SYNC_BUSY_ITERATIONS = 1_000_000;
+const SYNC_BUSY_MODULUS = 1_000_003;
+async function exerciseCycleSyncTimeoutExempt() {
+  const value = JSON.parse(JSON.stringify(cycleRequestValue));
+  Object.assign(value, {
+    controllerRunId: "cycle-cross-language-sync-exempt",
+    controllerId: "cycle-cross-language-sync-exempt-controller",
+    hostRun: {
+      relationship: "standalone-child-controller",
+      runId: "cycle-cross-language-sync-exempt-host",
+    },
+    eventStreamId: "cycle-cross-language-sync-exempt.events",
+    checkpointScope: "cycle-cross-language-sync-exempt.checkpoints",
+  });
+  value.policy.maxIterations = 1;
+  value.activities.finder.sideEffects = "idempotent";
+  value.activities.finder.timeoutMs = 1;
+  const request = runtime.validateCycleControllerRequest(value);
+  const store = new runtime.MemoryCycleControllerEventStore();
+  const inputs = [];
+  let elapsedMs = 0;
+  let checksum = 0;
+  const finder = (context) => {
+    inputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+    const begin = performance.now();
+    let acc = 0;
+    for (let index = 0; index < SYNC_BUSY_ITERATIONS; index += 1) {
+      acc = (acc * 31 + index) % SYNC_BUSY_MODULUS;
+    }
+    checksum = acc;
+    elapsedMs = performance.now() - begin;
+    return { output: [{ key: `busy-${acc}`, value: { checksum: acc } }] };
+  };
+  const candidateEvaluator = (context) => {
+    inputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+    return {
+      output: context.input.candidates.map(({ key }) => ({ key, verdict: "reject" })),
+    };
+  };
+  const result = await runtime.startCycleController(request, cycleGraph, {
+    eventStore: store,
+    lease: {
+      leaseId: "cycle-cross-language-sync-exempt-lease",
+      holderId: "cycle-cross-language-holder",
+      leaseEpoch: 1,
+      fencingToken: 1,
+      acquiredAt: cycleStartedAt,
+      expiresAt: "2026-07-26T12:01:00.000Z",
+    },
+    now: () => new Date(cycleStartedAt),
+    activities: { finder, candidateEvaluator },
+  });
+  assert.ok(
+    elapsedMs > value.activities.finder.timeoutMs,
+    "D8 sync busy work must exceed the 1 ms timeoutMs",
+  );
+  const events = store.snapshot(request.eventStreamId);
+  assert.equal(result.exitReason, "MAX_ITERATIONS", "D8 sync handler verdict drifted");
+  assert.ok(
+    !events.some(({ type }) => type === "ActivityFailed"),
+    "D8 sync handler must not time out",
+  );
+  const checkpoint = runtime.createCycleControllerCheckpoint(
+    events,
+    "cycle-cross-language-sync-exempt-terminal",
+    cycleCheckpointAt,
+  );
+  const inDoubtActivities = checkpoint.state.inDoubtActivities;
+  assert.deepEqual(inDoubtActivities, [], "D8 sync handler must not write in-doubt evidence");
+  return {
+    result,
+    resultCanonical: core.canonicalSerialize(result),
+    eventTypes: events.map(({ type }) => type),
+    eventCanonical: events.map((event) => core.canonicalSerialize(event)),
+    recordHashes: events.map(({ recordHash }) => recordHash),
+    activityKeys: events
+      .filter(({ type }) => type === "ActivityStarted")
+      .map(({ data }) => data.activityKey),
+    inputsCanonical: inputs.map((item) => core.canonicalSerialize(item)),
+    checkpoint,
+    checkpointCanonical: core.canonicalSerialize(checkpoint),
+    checkpointStateCanonical: core.canonicalSerialize(checkpoint.state),
+    inDoubtActivities,
+    checksum,
+  };
+}
+const tsSyncTimeoutExempt = await exerciseCycleSyncTimeoutExempt();
+for (const field of Object.keys(tsSyncTimeoutExempt)) {
+  assert.deepEqual(
+    tsSyncTimeoutExempt[field],
+    pyCycleReport.syncTimeoutExempt[field],
+    `D8 sync-timeout-exempt ${field} differs`,
+  );
+}
+process.stdout.write(
+  "Cross-language sync-timeout-exempt conformance passed: synchronous handler exceeding timeoutMs yields the same committed verdict in both runtimes.\n",
+);
+
 const patchRequestValue = JSON.parse(JSON.stringify(cycleRequestValue));
 Object.assign(patchRequestValue, {
   controllerRunId: "cycle-cross-language-patch",
@@ -4108,6 +4214,7 @@ const BARRIER_REPLAY_FIELDS = [
   "appendedDecisionEvents",
   "executorCalls",
   "executedNodeIds",
+  "scheduler",
   "currentPolicyHashes",
   "recomputedDecisionIds",
   "recordedPolicyHashes",
@@ -4342,13 +4449,13 @@ function barrierReplayGraph(testCase) {
 /**
  * The TypeScript replay half.
  *
- * `entry` is the comparable projection: it is produced by the same rule the
+ * The entry is the comparable projection: it is produced by the same rule the
  * Python report states, so the two halves can be compared member for member.
- * `scheduler` is a TypeScript-only strengthening — the authentic executor call
- * count and appended-event count observed by driving the real `runGraph` with
- * a spy executor on every policy-carrying node. Python has no scheduler surface
- * that accepts committed decisions, so only TypeScript can measure that; both
- * must still be zero.
+ * `scheduler` is the authentic observation made by driving the real `runGraph`
+ * with a spy executor on every policy-carrying node — the run status and the
+ * executors actually called. The Python half now drives its real `run_graph`
+ * with the same committed history and the same recording executors, so this
+ * member is computed natively on both sides and joined like every other.
  */
 async function typescriptBarrierReplayReport(testCase) {
   const currentPolicies = new Map(Object.entries(testCase.currentPolicies));
@@ -4401,6 +4508,8 @@ async function typescriptBarrierReplayReport(testCase) {
     appendedDecisionEvents,
     executorCalls: executedNodeIds.length,
     executedNodeIds,
+    // Observed by driving the real scheduler, natively on each side.
+    scheduler: { status: scheduled.status, spiedNodeIds },
     // Recomputed natively for every event in the history whatever the outcome:
     // this is what makes a forked child run recompute its own identity instead
     // of inheriting its parent's.
@@ -4428,7 +4537,7 @@ async function typescriptBarrierReplayReport(testCase) {
       if (Object.hasOwn(rejection, field)) entry[field] = rejection[field];
     }
   }
-  return { entry, scheduler: { status: scheduled.status, spiedNodeIds } };
+  return entry;
 }
 
 /** Replace exactly one JSON-pointer slot in a deep copy of a base document. */
@@ -4667,7 +4776,7 @@ const barrierReplayCases = barrierSectionNames(
 const barrierReplayCodesSeen = new Set();
 let barrierReplayAdoptions = 0;
 for (const testCase of barrierReplayCases) {
-  const { entry: tsEntry, scheduler } = await typescriptBarrierReplayReport(testCase);
+  const tsEntry = await typescriptBarrierReplayReport(testCase);
   const pyEntry = pyBarrierReport.replayCases[testCase.name];
   assertBarrierEntryAgreement(
     "replayCases",
@@ -4679,17 +4788,20 @@ for (const testCase of barrierReplayCases) {
   assertBarrierNoMaterializedNull(tsEntry, `replayCases '${testCase.name}' TypeScript`);
   assertBarrierNoMaterializedNull(pyEntry, `replayCases '${testCase.name}' Python`);
 
-  // The authentic scheduler observation, which only TypeScript can make.
-  assert.deepEqual(
-    scheduler.spiedNodeIds,
-    [],
-    `${testCase.name}: the real scheduler called an executor for a node with a committed decision`,
-  );
-  assert.equal(
-    scheduler.status,
-    testCase.expect.outcome === "adopted" ? "succeeded" : "failed",
-    `${testCase.name}: the real scheduler run status`,
-  );
+  // The authentic scheduler observation, made natively on both sides.
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.deepEqual(
+      entry.scheduler.spiedNodeIds,
+      [],
+      `${testCase.name}: the real ${language} scheduler called an executor `
+        + `for a node with a committed decision`,
+    );
+    assert.equal(
+      entry.scheduler.status,
+      testCase.expect.outcome === "adopted" ? "succeeded" : "failed",
+      `${testCase.name}: the real ${language} scheduler run status`,
+    );
+  }
 
   const expectation = testCase.expect;
   assert.strictEqual(
@@ -4819,7 +4931,7 @@ assert.ok(
 );
 
 process.stdout.write(
-  `Cross-language integrated-barrier conformance passed for ${barrierPolicyCases.length} policy cases (${barrierValidPolicyCases.length} normalized policy snapshots), ${barrierOwnershipCases.length} ownership cases through both the native validator and the real compiler pass, and ${barrierCompilerCases.length} compiler cases through compileGraph/try_compile_graph carrying ${barrierCompilerCases.length} literal graph hashes and ${barrierOrderedDiagnostics} ordered diagnostics (${barrierMultiDiagnosticCases} multi-diagnostic order witnesses, ${barrierRouterOrderWitnesses} router-before-barrier witness, ${barrierSuppressionWitnesses} suppression-chain witnesses, all 4 categories); tranche 2 joined ${barrierEvaluationCases.length} evaluation cases through evaluateIntegratedBarrier/evaluate_integrated_barrier (all ${barrierCorpus.vocabulary.reasonCodes.length} reason codes, all ${barrierCorpus.vocabulary.resolutions.length} resolutions, ${barrierCensusCases} quorum censuses carrying ${barrierCensusRecords} vote records), ${barrierIdentityCases.length} identity cases with policyHash and decisionId recomputed natively on both sides (${barrierIdentityBarrierDocuments} barrier, ${barrierIdentityRouteDocuments} route, ${barrierFramingWitnesses} naive-concatenation framing witness), ${barrierReplayCases.length} replay cases (${barrierReplayAdoptions} zero-rejudge adoptions, all ${barrierCorpus.vocabulary.replayRejectionCodes.length} rejection codes, 0 executor calls on both sides and 0 through the real scheduler), and ${barrierIdentifierCases.length} identifier cases (${barrierIdentifierAccepted} accepted, ${barrierIdentifierRejected} rejected); claims ${JSON.stringify(barrierCorpus.claims)}.\n`,
+  `Cross-language integrated-barrier conformance passed for ${barrierPolicyCases.length} policy cases (${barrierValidPolicyCases.length} normalized policy snapshots), ${barrierOwnershipCases.length} ownership cases through both the native validator and the real compiler pass, and ${barrierCompilerCases.length} compiler cases through compileGraph/try_compile_graph carrying ${barrierCompilerCases.length} literal graph hashes and ${barrierOrderedDiagnostics} ordered diagnostics (${barrierMultiDiagnosticCases} multi-diagnostic order witnesses, ${barrierRouterOrderWitnesses} router-before-barrier witness, ${barrierSuppressionWitnesses} suppression-chain witnesses, all 4 categories); tranche 2 joined ${barrierEvaluationCases.length} evaluation cases through evaluateIntegratedBarrier/evaluate_integrated_barrier (all ${barrierCorpus.vocabulary.reasonCodes.length} reason codes, all ${barrierCorpus.vocabulary.resolutions.length} resolutions, ${barrierCensusCases} quorum censuses carrying ${barrierCensusRecords} vote records), ${barrierIdentityCases.length} identity cases with policyHash and decisionId recomputed natively on both sides (${barrierIdentityBarrierDocuments} barrier, ${barrierIdentityRouteDocuments} route, ${barrierFramingWitnesses} naive-concatenation framing witness), ${barrierReplayCases.length} replay cases (${barrierReplayAdoptions} zero-rejudge adoptions, all ${barrierCorpus.vocabulary.replayRejectionCodes.length} rejection codes, 0 executor calls on both sides and 0 through the real scheduler in both languages), and ${barrierIdentifierCases.length} identifier cases (${barrierIdentifierAccepted} accepted, ${barrierIdentifierRejected} rejected); claims ${JSON.stringify(barrierCorpus.claims)}.\n`,
 );
 
 // ---------------------------------------------------------------------------
@@ -5397,8 +5509,10 @@ process.stdout.write(
 // refuse.
 //
 // Neither side may read the other's expectations. The TypeScript half below is
-// computed only from `@graph-engineering/persistence`; the Python half is
-// computed by tools/conformance/python_redaction_report.py from the native
+// computed from `@graph-engineering/persistence` (plus the runtime lane's
+// `diagnosticEvidenceAuthorized` for the Section 6.1 policy-enablement cases);
+// the Python half is computed by
+// tools/conformance/python_redaction_report.py from the native
 // `graph_engineering` package. The single shared input is the corpus JSON plus
 // the shared vectors restated identically in both halves, and the corpus
 // `expected`/`valid` blocks are consulted only after the two native results
@@ -5460,7 +5574,12 @@ const REDACTION_CANARY_PAYLOAD = {
 };
 const REDACTION_CANARY_TRANSFORM_HASH = "11".repeat(32);
 const REDACTION_CANARY_REGISTRY_HASH = "22".repeat(32);
-const REDACTION_REQUIRED_SECTIONS = ["pointerCases", "wireCases", "flowCases"];
+const REDACTION_REQUIRED_SECTIONS = [
+  "pointerCases",
+  "wireCases",
+  "flowCases",
+  "policyEnablementCases",
+];
 // Unit and record separators; the Python report joins the Cartesian sweep the
 // same way, so the two digests are over byte-identical material.
 const REDACTION_UNIT_SEPARATOR = "\u001f";
@@ -5971,6 +6090,81 @@ for (const outcome of ["protected-ref", "metadata-only", "suppressed", "failed"]
     `flowCases: the outcome '${outcome}' is unwitnessed by the corpus`,
   );
 }
+
+// --- 6b. Section 1.2 widening / Section 6.1 protected-evidence enablement ---
+// Each case names policy-mode overrides on the Section 4.1 default profile.
+// The TypeScript half computes `pairEnabled` with the persistence lane's
+// `policyEnabledFor` (the Section 1.2 formula whose explicit-widening test
+// spans the union of the source row's control and the sink row's controls) and
+// `evidenceAuthorized` with the runtime lane's `diagnosticEvidenceAuthorized`
+// (the stricter Section 6.1 gate that additionally requires
+// `errors: "protected-evidence"` itself). The Python half computes the same two
+// facts from `policy_enabled_for` and `diagnostic_evidence_authorized`. The
+// disposition rule both scheduler lanes apply follows the evidence: a captured
+// payload means `protected-ref`, none means `metadata-only`.
+const redactionEnablementCases = redactionSectionCases(
+  "policyEnablementCases",
+  pyRedaction.policyEnablementCaseOrder,
+  pyRedaction.policyEnablementCases,
+);
+let redactionEnablementAuthorized = 0;
+let redactionEnablementDenied = 0;
+for (const testCase of redactionEnablementCases) {
+  const policy = { ...persistence.DEFAULT_CAPTURE_POLICY, ...testCase.policyOverrides };
+  const evidenceAuthorized = runtime.diagnosticEvidenceAuthorized(policy, testCase.sink);
+  const tsEntry = {
+    pairEnabled: persistence.policyEnabledFor(policy, testCase.sourceClass, testCase.sink),
+    evidenceAuthorized,
+    nodeAttemptFailedDisposition: evidenceAuthorized ? "protected-ref" : "metadata-only",
+  };
+  const pyEntry = pyRedaction.policyEnablementCases[testCase.id];
+  assertRedactionEntryAgreement(
+    "policyEnablementCases",
+    testCase.id,
+    ["pairEnabled", "evidenceAuthorized", "nodeAttemptFailedDisposition"],
+    tsEntry,
+    pyEntry,
+  );
+  const expectation = testCase.expected;
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(
+      entry.pairEnabled,
+      expectation.pairEnabled,
+      `${testCase.id}: ${language} pairEnabled`,
+    );
+    assert.equal(
+      entry.evidenceAuthorized,
+      expectation.evidenceAuthorized,
+      `${testCase.id}: ${language} evidenceAuthorized`,
+    );
+    assert.equal(
+      entry.nodeAttemptFailedDisposition,
+      expectation.nodeAttemptFailedDisposition,
+      `${testCase.id}: ${language} NodeAttemptFailed disposition`,
+    );
+    // Section 6.1 is never wider than Section 1.2: evidence requires the pair.
+    assert.ok(
+      !entry.evidenceAuthorized || entry.pairEnabled,
+      `${testCase.id}: ${language} authorized evidence on a disabled pair`,
+    );
+  }
+  if (tsEntry.evidenceAuthorized) redactionEnablementAuthorized += 1;
+  else redactionEnablementDenied += 1;
+}
+assert.ok(
+  redactionEnablementAuthorized > 0,
+  "policyEnablementCases: the protected-evidence lever is unwitnessed",
+);
+assert.ok(
+  redactionEnablementDenied > 0,
+  "policyEnablementCases: no disabled or non-evidence policy was compared",
+);
+assert.ok(
+  redactionEnablementCases.some(
+    (item) => item.policyOverrides.errors === "codes-only" && !item.expected.pairEnabled,
+  ),
+  "policyEnablementCases: codes-only is not pinned as a disabled mode",
+);
 
 // --- 7. the bound redaction receipt ----------------------------------------
 const redactionReceiptRule = {
@@ -6611,7 +6805,7 @@ assert.ok(redactionWireValid > 0, "wireCases: no accepted document was compared"
 assert.ok(redactionWireInvalid > 0, "wireCases: no rejected document was compared");
 
 process.stdout.write(
-  `Cross-language redaction conformance passed for ${redactionPointerCases.length} pointer cases (${redactionPointerAccepted} transforms, ${redactionPointerRejected} rejections over ${redactionPointerCodesSeen.size} code), ${redactionWireCases.length} wire cases over ${redactionWireSchemas.size} schemas (${redactionWireValid} valid, ${redactionWireInvalid} rejected, ${redactionDispositionWireCases.length} disposition/redacted pairs), ${redactionFlowCases.length} flow cases (${redactionFlowAuthorized} authorized, ${redactionFlowDenied} denied) over the complete ${tsRedactionCartesian.pairCount}-pair Cartesian domain of ${tsRedactionNative.sourceRuleCount} sources x ${tsRedactionNative.sinkRuleCount} sinks (outcome digest ${tsRedactionCartesian.outcomeDigest.slice(0, 16)}), ${redactionCorpusReceiptCount + 1} receipts bound by count/order/MAC, the ${tsRedactionNative.failureCodes.length}-code vocabulary and the ${tsRedactionNative.payloadDispositions.length}-row disposition truth table, and one seeded canary scanned over ${tsRedactionCanary.guarded.filesScanned}/${pyRedaction.canary.guarded.filesScanned} files and ${tsRedactionCanary.guarded.bytesScanned}/${pyRedaction.canary.guarded.bytesScanned} bytes with 0 detections against ${tsRedactionCanary.positiveControl.detections.length}/${pyRedaction.canary.positiveControl.detections.length} positive-control detections; implementationClaim ${JSON.stringify(redactionCorpus.implementationClaim)}.\n`,
+  `Cross-language redaction conformance passed for ${redactionPointerCases.length} pointer cases (${redactionPointerAccepted} transforms, ${redactionPointerRejected} rejections over ${redactionPointerCodesSeen.size} code), ${redactionWireCases.length} wire cases over ${redactionWireSchemas.size} schemas (${redactionWireValid} valid, ${redactionWireInvalid} rejected, ${redactionDispositionWireCases.length} disposition/redacted pairs), ${redactionFlowCases.length} flow cases (${redactionFlowAuthorized} authorized, ${redactionFlowDenied} denied) over the complete ${tsRedactionCartesian.pairCount}-pair Cartesian domain of ${tsRedactionNative.sourceRuleCount} sources x ${tsRedactionNative.sinkRuleCount} sinks (outcome digest ${tsRedactionCartesian.outcomeDigest.slice(0, 16)}), ${redactionEnablementCases.length} policy-enablement cases (${redactionEnablementAuthorized} protected-evidence, ${redactionEnablementDenied} denied), ${redactionCorpusReceiptCount + 1} receipts bound by count/order/MAC, the ${tsRedactionNative.failureCodes.length}-code vocabulary and the ${tsRedactionNative.payloadDispositions.length}-row disposition truth table, and one seeded canary scanned over ${tsRedactionCanary.guarded.filesScanned}/${pyRedaction.canary.guarded.filesScanned} files and ${tsRedactionCanary.guarded.bytesScanned}/${pyRedaction.canary.guarded.bytesScanned} bytes with 0 detections against ${tsRedactionCanary.positiveControl.detections.length}/${pyRedaction.canary.positiveControl.detections.length} positive-control detections; implementationClaim ${JSON.stringify(redactionCorpus.implementationClaim)}.\n`,
 );
 
 // ---------------------------------------------------------------------------

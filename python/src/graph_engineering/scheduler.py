@@ -5,14 +5,35 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import partial
 from types import MappingProxyType
-from typing import Protocol
+from typing import Any, Protocol
 
 from .compiler import CompiledGraph, compile_graph
+from .integrated_barrier import (
+    IntegratedBarrierPolicySnapshot,
+    ValidBarrierPolicy,
+    claims_integrated_barrier_policy,
+    validate_integrated_barrier_policy,
+)
+from .integrated_barrier_runtime import (
+    BarrierArrival,
+    BarrierDecisionEvent,
+    BarrierDisposition,
+    BarrierResolution,
+    DecisionRejection,
+    MalformedBarrierVote,
+    ManualClock,
+    MonotonicClock,
+    build_barrier_decision,
+    evaluate_integrated_barrier,
+    fold_committed_decisions,
+    parse_barrier_vote,
+)
 from .models import MAX_SAFE_INTEGER, EdgeSpec, Endpoint, GraphSpec, JsonValue, NodeSpec
 from .portable_json import PortableJsonError, portable_json_snapshot
 from .primitives.router import evaluate_route_selection
@@ -50,12 +71,22 @@ class NodeStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     SKIPPED = "skipped"
+    # `unknown`, `awaiting_human` and `cancelled` are integrated-barrier
+    # terminals. None of them is a success and none of them binds an output.
+    UNKNOWN = "unknown"
+    AWAITING_HUMAN = "awaiting_human"
+    CANCELLED = "cancelled"
 
 
 class RunStatus(StrEnum):
+    """Run terminals. Precedence, highest first, is failed, cancelled,
+    awaiting_human, unknown, succeeded."""
+
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    AWAITING_HUMAN = "awaiting_human"
+    UNKNOWN = "unknown"
 
 
 class FailureCode(StrEnum):
@@ -73,6 +104,13 @@ class FailureCode(StrEnum):
     UNSUPPORTED_EDGE_CONDITION = "UNSUPPORTED_EDGE_CONDITION"
     UNSUPPORTED_RUNTIME_CAPABILITY = "UNSUPPORTED_RUNTIME_CAPABILITY"
     ROUTE_NOT_SELECTED = "ROUTE_NOT_SELECTED"
+    UPSTREAM_UNKNOWN = "UPSTREAM_UNKNOWN"
+    INVALID_BARRIER_VOTE = "INVALID_BARRIER_VOTE"
+    BARRIER_NOT_SATISFIED = "BARRIER_NOT_SATISFIED"
+    BARRIER_LATE_ARRIVAL = "BARRIER_LATE_ARRIVAL"
+    DECISION_POLICY_DRIFT = "DECISION_POLICY_DRIFT"
+    DECISION_IDENTITY_MISMATCH = "DECISION_IDENTITY_MISMATCH"
+    DUPLICATE_DECISION = "DUPLICATE_DECISION"
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,10 +192,66 @@ class RunResult:
     completion_order: tuple[str, ...]
     max_observed_concurrency: int
     total_attempts: int
+    #: Durable decision events this run committed, in commit order. Empty when
+    #: the run committed no decision.
+    decision_events: tuple[BarrierDecisionEvent, ...] = ()
 
     @property
     def succeeded(self) -> bool:
         return self.status is RunStatus.SUCCEEDED
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionContext:
+    """Run identity every durable decision this run commits binds."""
+
+    run_id: str = ""
+    graph_revision: int = 1
+
+
+class ScriptedClock:
+    """A monotonic clock driven by a scripted tick list.
+
+    ``now_ms`` starts at the first entry and advances to the next entry each
+    time the scheduler consumes a tick from :meth:`next_tick`. Once the list is
+    exhausted the driver reports that the clock will never advance again, so
+    the scheduler stops waiting on it instead of deadlocking. Delivery yields
+    to the event loop, which is what makes a tick a quiescence point rather
+    than a race with deterministic settlements.
+    """
+
+    __slots__ = ("_cursor", "_script")
+
+    def __init__(self, ticks: Sequence[int]) -> None:
+        script = list(ticks)
+        for index, value in enumerate(script):
+            if type(value) is not int or value < 0 or value > MAX_SAFE_INTEGER:
+                raise ValueError(f"scripted tick {index} must be a non-negative safe integer")
+            if index > 0 and value < script[index - 1]:
+                raise ValueError(f"scripted tick {index} moves a monotonic clock backwards")
+        self._script = script
+        self._cursor = 0
+
+    def now_ms(self) -> int:
+        return self._script[self._cursor] if self._script else 0
+
+    @property
+    def delivered_ticks(self) -> int:
+        """Number of ticks the scheduler has already consumed."""
+
+        return self._cursor
+
+    def next_tick(self) -> Coroutine[Any, Any, None] | None:
+        """The awaitable that advances ``now_ms``, or ``None`` when exhausted."""
+
+        if self._cursor + 1 >= len(self._script):
+            return None
+        return self._deliver()
+
+    async def _deliver(self) -> None:
+        await asyncio.sleep(0)
+        if self._cursor + 1 < len(self._script):
+            self._cursor += 1
 
 
 NodeHandler = Callable[[NodeContext], JsonValue | Awaitable[JsonValue]]
@@ -386,42 +480,66 @@ def _selected_routes(
     return frozenset(selected)
 
 
+def _adopted_selected_routes(value: JsonValue, node_id: str) -> frozenset[str]:
+    if type(value) is not dict:
+        raise _InvalidRouteSelectionError(
+            f"adopted route decision for {node_id!r} has no selectedRoutes"
+        )
+    selected = value.get("selectedRoutes")
+    if type(selected) is not list:
+        raise _InvalidRouteSelectionError(
+            f"adopted route decision for {node_id!r} has no selectedRoutes"
+        )
+    return frozenset(str(route) for route in selected)
+
+
+def _edge_selects(
+    graph: CompiledGraph,
+    edge: EdgeSpec,
+    source: NodeResult,
+    adopted_routes: frozenset[str],
+) -> bool:
+    """Whether one edge is active given its settled source result."""
+
+    if (
+        source.failure is not None
+        and source.failure.code is FailureCode.UNSUPPORTED_EDGE_CONDITION
+    ):
+        return True
+    route_key = _route_key(edge, graph)
+    if route_key is None:
+        return not _is_route_skip(source)
+    if source.status is not NodeStatus.SUCCEEDED:
+        return True
+    if edge.source.node in adopted_routes:
+        # An adopted RouteSelected decision is authoritative forever: selection
+        # is never recomputed and upstream values are never re-read.
+        return route_key in _adopted_selected_routes(source.value, edge.source.node)
+    if not source.input_bound:
+        raise _InvalidRouteSelectionError(
+            f"router {edge.source.node!r} result has no authoritative input"
+        )
+    selected = _selected_routes(
+        source.value,
+        graph.nodes[edge.source.node],
+        source.input,
+    )
+    return route_key in selected
+
+
 def _active_incoming_edges(
     graph: CompiledGraph,
     node_id: str,
     results: Mapping[str, NodeResult],
+    adopted_routes: frozenset[str] = frozenset(),
 ) -> tuple[EdgeSpec, ...]:
     """Return the dependencies selected by recorded router node outputs."""
 
-    active: list[EdgeSpec] = []
-    for edge in graph.incoming[node_id]:
-        source = results[edge.source.node]
-        if (
-            source.failure is not None
-            and source.failure.code is FailureCode.UNSUPPORTED_EDGE_CONDITION
-        ):
-            active.append(edge)
-            continue
-        route_key = _route_key(edge, graph)
-        if route_key is None:
-            if not _is_route_skip(source):
-                active.append(edge)
-            continue
-        if source.status is not NodeStatus.SUCCEEDED:
-            active.append(edge)
-            continue
-        if not source.input_bound:
-            raise _InvalidRouteSelectionError(
-                f"router {edge.source.node!r} result has no authoritative input"
-            )
-        selected = _selected_routes(
-            source.value,
-            graph.nodes[edge.source.node],
-            source.input,
-        )
-        if route_key in selected:
-            active.append(edge)
-    return tuple(active)
+    return tuple(
+        edge
+        for edge in graph.incoming[node_id]
+        if _edge_selects(graph, edge, results[edge.source.node], adopted_routes)
+    )
 
 
 def _unsupported_condition_sources(graph: CompiledGraph) -> dict[str, str]:
@@ -458,13 +576,32 @@ def _json_pointer_segment(value: str) -> str:
     return value.replace("~", "~0").replace("/", "~1")
 
 
-def _runtime_capability_issues(graph: CompiledGraph) -> tuple[_RuntimeCapabilityIssue, ...]:
+#: Capability name for a `barrier` node whose config claims
+#: `IntegratedBarrierPolicy` by `apiVersion`. An entry point that does not
+#: implement barrier satisfaction must refuse such a graph before dispatch:
+#: executing the node as an ordinary deterministic transform would silently
+#: pass an unsatisfied barrier. The gate keys on the ownership claim, not on
+#: the shape, so a pre-contract barrier config keeps `node-config:barrier`.
+INTEGRATED_BARRIER_CAPABILITY = "integrated-barrier-policy"
+
+
+def _runtime_capability_issues(
+    graph: CompiledGraph,
+    *,
+    integrated_barrier: bool = False,
+) -> tuple[_RuntimeCapabilityIssue, ...]:
     """Return every unsupported executable declaration in stable document order.
 
     Graph IR intentionally contains vocabulary ahead of the native scheduler.
     Accepting that vocabulary must never silently weaken it into ordinary value
     execution. This inventory is therefore checked before handlers, durable
     history reads, or durable appends.
+
+    ``integrated_barrier`` is set only by an entry point that actually
+    implements arming, satisfaction arithmetic, deadlines, resolutions, late
+    arrival, cancellation and the durable decision document. The ordinary
+    scheduler does; the durable scheduler does not journal ``BarrierSatisfied``
+    yet, so it keeps refusing.
     """
 
     spec = graph.spec
@@ -481,8 +618,16 @@ def _runtime_capability_issues(graph: CompiledGraph) -> tuple[_RuntimeCapability
         path = f"#/nodes/{index}"
         if node.kind not in _SUPPORTED_NODE_KINDS:
             add(node.id, f"node-kind:{node.kind}", f"{path}/kind")
-        if node.kind == "barrier" and node.config not in ({}, {"condition": "all"}):
-            add(node.id, "node-config:barrier", f"{path}/config")
+        if node.kind == "barrier":
+            # A claimed integrated barrier policy is refused under its own
+            # capability name so the failure states the real reason. Every
+            # other unsupported barrier config keeps the published
+            # `node-config:barrier` name.
+            if claims_integrated_barrier_policy(node.config):
+                if not integrated_barrier:
+                    add(node.id, INTEGRATED_BARRIER_CAPABILITY, f"{path}/config")
+            elif node.config not in ({}, {"condition": "all"}):
+                add(node.id, "node-config:barrier", f"{path}/config")
         if node.cache is not None:
             add(node.id, "node-cache", f"{path}/cache")
         if node.resources is not None:
@@ -527,7 +672,11 @@ def _runtime_capability_issues(graph: CompiledGraph) -> tuple[_RuntimeCapability
     return tuple(issues)
 
 
-def _condition_capability_failure(graph: CompiledGraph) -> RunResult | None:
+def _condition_capability_failure(
+    graph: CompiledGraph,
+    *,
+    integrated_barrier: bool = False,
+) -> RunResult | None:
     """Fail before dispatch for unsupported runtime declarations or conditions.
 
     The compiler registry deliberately accepts conditions owned by other graph
@@ -537,7 +686,7 @@ def _condition_capability_failure(graph: CompiledGraph) -> RunResult | None:
     a node result or consuming an attempt.
     """
 
-    runtime_issues = _runtime_capability_issues(graph)
+    runtime_issues = _runtime_capability_issues(graph, integrated_barrier=integrated_barrier)
     condition_issues = _unsupported_condition_sources(graph)
     if not runtime_issues and not condition_issues:
         return None
@@ -572,6 +721,132 @@ def _condition_capability_failure(graph: CompiledGraph) -> RunResult | None:
         completion_order=(),
         max_observed_concurrency=0,
         total_attempts=0,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _BarrierBinding:
+    """A barrier node the scheduler owns, with its incoming edges in graph
+    declaration order. That order is normative and appears verbatim in the
+    decision document, so it is deliberately not the sorted edge-ID ordering
+    input binding uses."""
+
+    node_id: str
+    policy: IntegratedBarrierPolicySnapshot
+    policy_document: JsonValue
+    incoming: tuple[EdgeSpec, ...]
+
+
+@dataclass(slots=True)
+class _BarrierState:
+    """Barrier state between arming and the single decision it may commit."""
+
+    armed_at_ms: int | None = None
+    decided: bool = False
+    #: Sources still unsettled when the decision committed; every one is late.
+    late_sources: set[str] = field(default_factory=set)
+
+
+def _bind_integrated_barriers(graph: CompiledGraph) -> dict[str, _BarrierBinding]:
+    bindings: dict[str, _BarrierBinding] = {}
+    for node in graph.spec.nodes:
+        if node.kind != "barrier":
+            continue
+        validation = validate_integrated_barrier_policy(node.config)
+        if isinstance(validation, ValidBarrierPolicy):
+            bindings[node.id] = _BarrierBinding(
+                node.id,
+                validation.policy,
+                node.config,
+                graph.incoming[node.id],
+            )
+    return bindings
+
+
+#: Upstream failure codes that mean the source settled without ever attempting,
+#: or was cancelled before settling. Every one is a `missing` arrival.
+_MISSING_UPSTREAM_CODES = frozenset(
+    {
+        FailureCode.ROUTE_NOT_SELECTED,
+        FailureCode.UPSTREAM_FAILED,
+        FailureCode.UPSTREAM_UNKNOWN,
+        FailureCode.NODE_CANCELLED,
+    }
+)
+_VERDICT_DISPOSITION: Mapping[str, BarrierDisposition] = MappingProxyType(
+    {
+        "accept": BarrierDisposition.SUCCEEDED,
+        "reject": BarrierDisposition.FAILED,
+        "abstain": BarrierDisposition.ABSTAINED,
+        "unknown": BarrierDisposition.UNKNOWN,
+    }
+)
+#: Terminal node status each barrier resolution settles the barrier node with.
+_BARRIER_RESOLUTION_STATUS: Mapping[BarrierResolution, NodeStatus] = MappingProxyType(
+    {
+        BarrierResolution.SATISFIED: NodeStatus.SUCCEEDED,
+        BarrierResolution.FAILED: NodeStatus.FAILED,
+        BarrierResolution.UNKNOWN: NodeStatus.UNKNOWN,
+        BarrierResolution.AWAITING_HUMAN: NodeStatus.AWAITING_HUMAN,
+    }
+)
+#: The three identity members an adopted route decision strips back off the
+#: published eight-member route-selection output.
+_ROUTE_IDENTITY_MEMBERS = frozenset({"routerNodeId", "policyHash", "decisionId"})
+
+
+def _resolve_barrier_arrival(
+    policy: IntegratedBarrierPolicySnapshot,
+    edge: EdgeSpec,
+    result: NodeResult | None,
+    edge_active: bool,
+    bound_value: Callable[[], JsonValue],
+) -> BarrierArrival | str:
+    """Classify one incoming edge into exactly one disposition entry.
+
+    `all`, `minimum` and `percentage` barriers deliberately do not inspect
+    upstream values: a source that executed successfully contributes
+    `succeeded` regardless of what its output says. Only `quorum` reads the
+    ballot. A malformed quorum ballot returns the source node ID instead of an
+    arrival: it is never coerced and contributes no disposition entry.
+    """
+
+    source_node_id = edge.source.node
+    if result is None:
+        # Still unsettled at the deciding quiescence point, which is only
+        # reachable when the deadline elapsed.
+        return BarrierArrival(source_node_id, BarrierDisposition.TIMED_OUT)
+    if not edge_active:
+        return BarrierArrival(source_node_id, BarrierDisposition.MISSING)
+    if result.status is not NodeStatus.SUCCEEDED:
+        code = result.failure.code if result.failure is not None else None
+        disposition = (
+            BarrierDisposition.FAILED
+            if result.status is NodeStatus.FAILED
+            and (code is None or code not in _MISSING_UPSTREAM_CODES)
+            else BarrierDisposition.MISSING
+        )
+        return BarrierArrival(source_node_id, disposition)
+    if policy.kind != "quorum":
+        return BarrierArrival(source_node_id, BarrierDisposition.SUCCEEDED)
+
+    ballot = parse_barrier_vote(bound_value())
+    if isinstance(ballot, MalformedBarrierVote):
+        return source_node_id
+    return BarrierArrival(source_node_id, _VERDICT_DISPOSITION[ballot.verdict.value], ballot)
+
+
+def _is_unknown_terminal(result: NodeResult) -> bool:
+    """An upstream that settled `unknown`, or inherited `UPSTREAM_UNKNOWN`.
+
+    Neither is a failure: a run does not fail solely because a barrier
+    resolved to unknown.
+    """
+
+    return result.status is NodeStatus.UNKNOWN or (
+        result.status is NodeStatus.SKIPPED
+        and result.failure is not None
+        and result.failure.code is FailureCode.UPSTREAM_UNKNOWN
     )
 
 
@@ -1090,11 +1365,18 @@ class AsyncScheduler:
         initial_completion_order: tuple[str, ...] = (),
         initial_max_observed_concurrency: int = 0,
         initial_retry_delays: Mapping[str, float] | None = None,
+        integrated_barrier: bool = False,
+        clock: MonotonicClock | None = None,
+        decision: DecisionContext | None = None,
+        committed_decisions: Sequence[Mapping[str, JsonValue]] | None = None,
     ) -> RunResult:
         """Run a compiled graph and return deterministic, structured results."""
 
         graph = _snapshot_compiled_graph(graph)
-        capability_failure = _condition_capability_failure(graph)
+        capability_failure = _condition_capability_failure(
+            graph,
+            integrated_barrier=integrated_barrier,
+        )
         if capability_failure is not None:
             return capability_failure
         try:
@@ -1145,17 +1427,129 @@ class AsyncScheduler:
                         f"initial_results contains an invalid successful router decision "
                         f"for {node_id!r}"
                     ) from exc
+
+        barrier_clock: MonotonicClock = clock if clock is not None else ManualClock(0)
+        decision_context = decision if decision is not None else DecisionContext()
+        barrier_bindings = _bind_integrated_barriers(graph) if integrated_barrier else {}
+        barrier_states = {binding_id: _BarrierState() for binding_id in barrier_bindings}
+        decision_events: list[BarrierDecisionEvent] = []
+        late_arrival_failures: list[NodeFailure] = []
+        adopted_routes: set[str] = set()
+        halted_for_human = False
+
+        # Fold the durable history before scheduling. A node with a committed
+        # decision is never re-evaluated: no executor call, no recomputation,
+        # no upstream re-read, and no second decision event.
+        committed = tuple(committed_decisions or ())
+        if committed:
+            current_policies: dict[str, JsonValue] = {}
+            for event in committed:
+                if not isinstance(event, Mapping):
+                    raise TypeError("committed_decisions entries must be mappings")
+                if event.get("type") not in {"BarrierSatisfied", "RouteSelected"}:
+                    continue
+                event_node_id = event.get("nodeId")
+                if not isinstance(event_node_id, str) or event_node_id not in graph.nodes:
+                    raise TypeError(
+                        f"committed decision targets unknown node {event_node_id!r}"
+                    )
+                current_policies[event_node_id] = graph.nodes[event_node_id].config
+            outcome = fold_committed_decisions(
+                committed,
+                run_id=decision_context.run_id,
+                graph_revision=decision_context.graph_revision,
+                current_policies=current_policies,
+            )
+            if isinstance(outcome, DecisionRejection):
+                return RunResult(
+                    status=RunStatus.FAILED,
+                    graph_hash=graph.graph_hash,
+                    nodes=MappingProxyType({}),
+                    outputs=None,
+                    failures=(
+                        NodeFailure(
+                            FailureCode(outcome.code.value),
+                            outcome.message,
+                            outcome.node_id,
+                            0,
+                        ),
+                    ),
+                    scheduled_order=(),
+                    completion_order=(),
+                    max_observed_concurrency=0,
+                    total_attempts=0,
+                )
+            for adopted in outcome.adopted:
+                if adopted.event_type == "RouteSelected":
+                    route_output = portable_json_snapshot(
+                        {
+                            key: value
+                            for key, value in adopted.document.items()
+                            if key not in _ROUTE_IDENTITY_MEMBERS
+                        }
+                    )
+                    restored_results[adopted.node_id] = NodeResult(
+                        node_id=adopted.node_id,
+                        sequence=sequence[adopted.node_id],
+                        status=NodeStatus.SUCCEEDED,
+                        attempts=0,
+                        value=route_output,
+                        input_bound=False,
+                    )
+                    adopted_routes.add(adopted.node_id)
+                    continue
+                resolution_value = adopted.document.get("resolution")
+                try:
+                    resolution = BarrierResolution(str(resolution_value))
+                except ValueError:
+                    raise TypeError(
+                        f"committed barrier decision for {adopted.node_id!r} "
+                        "has no resolution"
+                    ) from None
+                adopted_status = _BARRIER_RESOLUTION_STATUS[resolution]
+                restored_results[adopted.node_id] = NodeResult(
+                    node_id=adopted.node_id,
+                    sequence=sequence[adopted.node_id],
+                    status=adopted_status,
+                    attempts=0,
+                    value=(
+                        portable_json_snapshot(dict(adopted.document))
+                        if adopted_status is NodeStatus.SUCCEEDED
+                        else None
+                    ),
+                    input_bound=False,
+                    failure=(
+                        NodeFailure(
+                            FailureCode.BARRIER_NOT_SATISFIED,
+                            f"barrier {adopted.node_id!r} was not satisfied",
+                            adopted.node_id,
+                            0,
+                        )
+                        if adopted_status is NodeStatus.FAILED
+                        else None
+                    ),
+                )
+                adopted_state = barrier_states.get(adopted.node_id)
+                if adopted_state is not None:
+                    adopted_state.decided = True
+                if adopted_status is NodeStatus.AWAITING_HUMAN:
+                    halted_for_human = True
+
         remaining = {node_id: len(graph.incoming[node_id]) for node_id in graph.nodes}
         for restored_node_id in graph.topological_order:
             if restored_node_id not in restored_results:
                 continue
             for edge in graph.outgoing[restored_node_id]:
                 remaining[edge.target.node] -= 1
+        # A bound integrated barrier never enters the ready queue: it is decided
+        # by the scheduler at a quiescence point, with zero executor attempts.
         ready = sorted(
             (
                 node_id
                 for node_id, count in remaining.items()
-                if count == 0 and node_id not in restored_results
+                if count == 0
+                and node_id not in restored_results
+                and node_id not in barrier_bindings
             ),
             key=sequence.__getitem__,
         )
@@ -1234,15 +1628,48 @@ class AsyncScheduler:
             if node_id not in durable_scheduled_prefix:
                 scheduled_ordinals.setdefault(node_id, ordinal)
 
+        def observe_late_arrival(source_node_id: str) -> None:
+            """A source that settles after a barrier already committed.
+
+            The committed decision is immutable either way: a late arrival
+            never mutates `total`, any count, any ID list, any vote, or the
+            decision identity.
+            """
+
+            for barrier_node_id, state in barrier_states.items():
+                if not state.decided or source_node_id not in state.late_sources:
+                    continue
+                state.late_sources.discard(source_node_id)
+                binding = barrier_bindings[barrier_node_id]
+                if binding.policy.late_arrival != "reject":
+                    continue
+                late_arrival_failures.append(
+                    NodeFailure(
+                        FailureCode.BARRIER_LATE_ARRIVAL,
+                        (
+                            f"barrier {barrier_node_id!r} had already decided when "
+                            f"upstream {source_node_id!r} settled"
+                        ),
+                        barrier_node_id,
+                        0,
+                        upstream_nodes=(source_node_id,),
+                    )
+                )
+
         def settle(node_id: str, result: NodeResult) -> None:
             results[node_id] = result
             completion.append(node_id)
             for edge in graph.outgoing[node_id]:
                 target = edge.target.node
                 remaining[target] -= 1
-                if remaining[target] == 0:
+                if (
+                    remaining[target] == 0
+                    and target not in results
+                    and target not in barrier_bindings
+                ):
                     ready.append(target)
             ready.sort(key=sequence.__getitem__)
+            observe_late_arrival(node_id)
 
         async def settle_without_attempt(node_id: str, result: NodeResult) -> None:
             if journal is not None:
@@ -1278,7 +1705,12 @@ class AsyncScheduler:
                     continue
 
                 try:
-                    active_incoming = _active_incoming_edges(graph, node_id, results)
+                    active_incoming = _active_incoming_edges(
+                        graph,
+                        node_id,
+                        results,
+                        frozenset(adopted_routes),
+                    )
                 except (_UnsupportedEdgeConditionError, _InvalidRouteSelectionError) as exc:
                     code = (
                         FailureCode.UNSUPPORTED_EDGE_CONDITION
@@ -1324,6 +1756,48 @@ class AsyncScheduler:
                         ),
                     )
                     continue
+                unsucceeded_upstream = tuple(
+                    sorted(
+                        {
+                            edge.source.node
+                            for edge in active_incoming
+                            if results[edge.source.node].status is not NodeStatus.SUCCEEDED
+                        }
+                    )
+                )
+                unknown_upstream = tuple(
+                    upstream_id
+                    for upstream_id in unsucceeded_upstream
+                    if _is_unknown_terminal(results[upstream_id])
+                )
+                upstream_failed = tuple(
+                    upstream_id
+                    for upstream_id in unsucceeded_upstream
+                    if not _is_unknown_terminal(results[upstream_id])
+                )
+                # A descendant reachable only through a barrier that resolved
+                # `unknown` inherits the zero-attempt UPSTREAM_UNKNOWN
+                # terminal. A genuine upstream failure still outranks it.
+                if not cancellation.cancelled and not upstream_failed and unknown_upstream:
+                    await settle_without_attempt(
+                        node_id,
+                        NodeResult(
+                            node_id=node_id,
+                            sequence=sequence[node_id],
+                            status=NodeStatus.SKIPPED,
+                            attempts=attempt_offset,
+                            input_bound=False,
+                            failure=NodeFailure(
+                                FailureCode.UPSTREAM_UNKNOWN,
+                                "node did not start because upstream dependencies "
+                                "are unknown",
+                                node_id,
+                                attempt_offset,
+                                upstream_nodes=unknown_upstream,
+                            ),
+                        ),
+                    )
+                    continue
                 if cancellation.cancelled:
                     await settle_without_attempt(
                         node_id,
@@ -1336,15 +1810,6 @@ class AsyncScheduler:
                         ),
                     )
                     continue
-                upstream_failed = tuple(
-                    sorted(
-                        {
-                            edge.source.node
-                            for edge in active_incoming
-                            if results[edge.source.node].status is not NodeStatus.SUCCEEDED
-                        }
-                    )
-                )
                 if upstream_failed:
                     await settle_without_attempt(
                         node_id,
@@ -1424,13 +1889,261 @@ class AsyncScheduler:
                 )
                 active[task] = node_id
 
+        def barrier_node_result(
+            node_id: str,
+            status: NodeStatus,
+            *,
+            attempts: int = 0,
+            value: JsonValue = None,
+            failure: NodeFailure | None = None,
+        ) -> NodeResult:
+            return NodeResult(
+                node_id=node_id,
+                sequence=sequence[node_id],
+                status=status,
+                attempts=attempts,
+                value=value,
+                failure=failure,
+                input_bound=False,
+            )
+
+        def bound_vote_value(edge: EdgeSpec) -> JsonValue:
+            """The value a barrier edge would bind, for ballot extraction only."""
+
+            source = results.get(edge.source.node)
+            if source is None:
+                return None
+            try:
+                return _endpoint_value(edge.source, source.value)
+            except _BindingError:
+                return None
+
+        async def decide_barrier(binding: _BarrierBinding, state: _BarrierState) -> None:
+            nonlocal halted_for_human, total_attempts
+            node_id = binding.node_id
+            if node_id not in scheduled:
+                scheduled.append(node_id)
+            arrivals: list[BarrierArrival] = []
+            for edge in binding.incoming:
+                source_result = results.get(edge.source.node)
+                edge_active = source_result is None or _edge_selects(
+                    graph,
+                    edge,
+                    source_result,
+                    frozenset(adopted_routes),
+                )
+                resolved = _resolve_barrier_arrival(
+                    binding.policy,
+                    edge,
+                    source_result,
+                    edge_active,
+                    partial(bound_vote_value, edge),
+                )
+                if isinstance(resolved, str):
+                    # A malformed vote is never coerced to abstain or unknown
+                    # and produces no disposition entry: the barrier fails
+                    # non-retryably after exactly one attempt.
+                    state.decided = True
+                    total_attempts += 1
+                    await settle_without_attempt(
+                        node_id,
+                        barrier_node_result(
+                            node_id,
+                            NodeStatus.FAILED,
+                            attempts=1,
+                            failure=NodeFailure(
+                                FailureCode.INVALID_BARRIER_VOTE,
+                                (
+                                    f"barrier {node_id!r} received a malformed vote "
+                                    f"from {resolved!r}"
+                                ),
+                                node_id,
+                                1,
+                                upstream_nodes=(resolved,),
+                            ),
+                        ),
+                    )
+                    return
+                arrivals.append(resolved)
+
+            armed_at_ms = state.armed_at_ms
+            if armed_at_ms is None:
+                raise AssertionError(f"barrier {node_id!r} decided before it armed")
+            evaluation = evaluate_integrated_barrier(binding.policy, node_id, arrivals)
+            document = build_barrier_decision(
+                evaluation,
+                policy_document=binding.policy_document,
+                run_id=decision_context.run_id,
+                graph_revision=decision_context.graph_revision,
+                armed_at_ms=armed_at_ms,
+                decided_at_ms=barrier_clock.now_ms(),
+            )
+            state.decided = True
+            state.late_sources = {
+                edge.source.node
+                for edge in binding.incoming
+                if edge.source.node not in results
+            }
+            decision_events.append(BarrierDecisionEvent("BarrierSatisfied", node_id, document))
+            if evaluation.resolution is BarrierResolution.AWAITING_HUMAN:
+                decision_events.append(
+                    BarrierDecisionEvent("HumanInputRequested", node_id, document)
+                )
+                halted_for_human = True
+            status = _BARRIER_RESOLUTION_STATUS[evaluation.resolution]
+            await settle_without_attempt(
+                node_id,
+                barrier_node_result(
+                    node_id,
+                    status,
+                    # A satisfied barrier binds the decision document. An
+                    # unsatisfied one NEVER binds an output, whichever
+                    # resolution it declared.
+                    value=(
+                        portable_json_snapshot(document)
+                        if status is NodeStatus.SUCCEEDED
+                        else None
+                    ),
+                    failure=(
+                        NodeFailure(
+                            FailureCode.BARRIER_NOT_SATISFIED,
+                            (
+                                f"barrier {node_id!r} was not satisfied "
+                                f"({evaluation.reason_code.value})"
+                            ),
+                            node_id,
+                            0,
+                        )
+                        if status is NodeStatus.FAILED
+                        else None
+                    ),
+                ),
+            )
+
+        async def observe_barrier_quiescence() -> bool:
+            """One quiescence point: arm every barrier that now has a bound
+            upstream, then decide every barrier that is complete or whose
+            deadline has elapsed. Returns True when anything settled."""
+
+            settled_any = False
+            for node_id in graph.topological_order:
+                binding = barrier_bindings.get(node_id)
+                state = barrier_states.get(node_id)
+                if binding is None or state is None or state.decided:
+                    continue
+
+                if cancellation.cancelled:
+                    # A cancelled armed barrier emits no decision event and
+                    # never produces a partial decision document.
+                    state.decided = True
+                    settled_any = True
+                    await settle_without_attempt(
+                        node_id,
+                        _cancelled_result(
+                            node_id,
+                            sequence[node_id],
+                            0,
+                            status=NodeStatus.SKIPPED,
+                            input_bound=False,
+                        )
+                        if state.armed_at_ms is None
+                        else barrier_node_result(node_id, NodeStatus.CANCELLED),
+                    )
+                    continue
+
+                settled_sources = [
+                    edge for edge in binding.incoming if edge.source.node in results
+                ]
+                if not settled_sources:
+                    continue
+                if state.armed_at_ms is None:
+                    state.armed_at_ms = barrier_clock.now_ms()
+                complete = len(settled_sources) == len(binding.incoming)
+                deadline = binding.policy.deadline
+                elapsed = (
+                    deadline is not None
+                    and barrier_clock.now_ms() - state.armed_at_ms >= deadline.after_ms
+                )
+                if not complete and not elapsed:
+                    continue
+                await decide_barrier(binding, state)
+                settled_any = True
+            return settled_any
+
+        def awaits_deadline() -> bool:
+            """True while some armed barrier can only be decided by the clock."""
+
+            for node_id, state in barrier_states.items():
+                if state.decided or state.armed_at_ms is None:
+                    continue
+                if barrier_bindings[node_id].policy.deadline is not None:
+                    return True
+            return False
+
+        pending_tick: asyncio.Task[None] | None = None
+
+        def tick_contender() -> asyncio.Task[None] | None:
+            # At most one tick is ever outstanding, so a tick the race did not
+            # win is reused rather than pulling a second scripted value.
+            nonlocal pending_tick
+            if pending_tick is not None:
+                return pending_tick
+            next_tick = getattr(barrier_clock, "next_tick", None)
+            if next_tick is None:
+                return None
+            delivery = next_tick()
+            if delivery is None:
+                return None
+            pending_tick = asyncio.create_task(delivery)
+            return pending_tick
+
         try:
             while len(results) < len(graph.nodes):
-                await launch_ready()
-                if not active:
+                if not halted_for_human:
+                    await launch_ready()
+                if await observe_barrier_quiescence():
+                    continue
+                # A human resolution schedules no descendant and stops.
+                if halted_for_human and not active:
                     break
-                done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
-                for task in sorted(done, key=lambda item: sequence[active[item]]):
+                wait_for_tick = not halted_for_human and awaits_deadline()
+                contenders: set[asyncio.Task[Any]] = set(active)
+                tick_task: asyncio.Task[None] | None = None
+                cancel_task: asyncio.Task[None] | None = None
+                if wait_for_tick:
+                    tick_task = tick_contender()
+                    if tick_task is not None:
+                        contenders.add(tick_task)
+                    if not cancellation.cancelled:
+                        # Cancellation is a quiescence point of its own, so a
+                        # barrier waiting on a deadline must never outlive the
+                        # run's cancellation.
+                        cancel_task = asyncio.create_task(cancellation.wait())
+                        contenders.add(cancel_task)
+                if not active and tick_task is None:
+                    if cancel_task is not None:
+                        cancel_task.cancel()
+                        await asyncio.gather(cancel_task, return_exceptions=True)
+                    break
+                try:
+                    done, _ = await asyncio.wait(
+                        contenders, return_when=asyncio.FIRST_COMPLETED
+                    )
+                finally:
+                    if cancel_task is not None and not cancel_task.done():
+                        cancel_task.cancel()
+                        await asyncio.gather(cancel_task, return_exceptions=True)
+                if pending_tick is not None and pending_tick.done():
+                    delivered = pending_tick
+                    pending_tick = None
+                    await delivered
+                # Node settlements are handled ahead of the tick so a
+                # deterministic settlement is always observed at the earliest
+                # quiescence point it could have produced.
+                for task in sorted(
+                    (item for item in done if item in active),
+                    key=lambda item: sequence[active[item]],
+                ):
                     node_id = active.pop(task)
                     settle(node_id, task.result())
         except BaseException:
@@ -1447,20 +2160,34 @@ class AsyncScheduler:
             if journal is None:
                 await asyncio.gather(*active_tasks, return_exceptions=True)
             raise
+        finally:
+            if pending_tick is not None:
+                pending_tick.cancel()
+                await asyncio.gather(pending_tick, return_exceptions=True)
 
-        ordered_results = {node_id: results[node_id] for node_id in graph.topological_order}
+        # A run halted by a human resolution legitimately leaves nodes
+        # unscheduled, so only settled nodes are projected.
+        ordered_results = {
+            node_id: results[node_id]
+            for node_id in graph.topological_order
+            if node_id in results
+        }
+        # `UPSTREAM_UNKNOWN` is excluded from graph failure codes exactly as
+        # `ROUTE_NOT_SELECTED` already is: neither invents a node failure.
         failures = [
             result.failure
             for result in ordered_results.values()
             if result.failure is not None
-            and result.failure.code is not FailureCode.ROUTE_NOT_SELECTED
+            and result.failure.code
+            not in (FailureCode.ROUTE_NOT_SELECTED, FailureCode.UPSTREAM_UNKNOWN)
         ]
+        failures.extend(late_arrival_failures)
         output_values: dict[str, JsonValue] = {}
         outputs_complete = True
         for output_name in sorted(graph.spec.outputs):
             endpoint = graph.spec.outputs[output_name]
-            result = results[endpoint.node]
-            if result.status is not NodeStatus.SUCCEEDED:
+            result = results.get(endpoint.node)
+            if result is None or result.status is not NodeStatus.SUCCEEDED:
                 outputs_complete = False
                 continue
             try:
@@ -1481,8 +2208,28 @@ class AsyncScheduler:
                     )
                 )
 
-        if cancellation.cancelled:
+        # Run terminal precedence, highest first: failed, cancelled,
+        # awaiting_human, unknown, succeeded. A node whose only failure is its
+        # own cancellation counts as a cancellation rather than a failure, so
+        # the shipped `cancelled` terminal keeps outranking the NODE_CANCELLED
+        # failures it necessarily emits.
+        genuinely_failed = any(
+            failure.code is not FailureCode.NODE_CANCELLED for failure in failures
+        )
+        awaiting_human = any(
+            result.status is NodeStatus.AWAITING_HUMAN for result in ordered_results.values()
+        )
+        unknown_terminal = any(
+            result.status is NodeStatus.UNKNOWN for result in ordered_results.values()
+        )
+        if genuinely_failed:
+            status = RunStatus.FAILED
+        elif cancellation.cancelled:
             status = RunStatus.CANCELLED
+        elif awaiting_human:
+            status = RunStatus.AWAITING_HUMAN
+        elif unknown_terminal:
+            status = RunStatus.UNKNOWN
         elif not failures and outputs_complete and len(results) == len(graph.nodes):
             status = RunStatus.SUCCEEDED
         else:
@@ -1529,6 +2276,7 @@ class AsyncScheduler:
             completion_order=completion_order,
             max_observed_concurrency=max_observed_concurrency,
             total_attempts=total_attempts,
+            decision_events=tuple(decision_events),
         )
         if journal is not None:
             await journal.run_terminal(run_result)
@@ -1540,10 +2288,26 @@ class AsyncScheduler:
         graph_input: JsonValue,
         *,
         cancel_event: asyncio.Event | None = None,
+        clock: MonotonicClock | None = None,
+        decision: DecisionContext | None = None,
+        committed_decisions: Sequence[Mapping[str, JsonValue]] | None = None,
     ) -> RunResult:
-        """Run a compiled graph and return deterministic, structured results."""
+        """Run a compiled graph and return deterministic, structured results.
 
-        return await self._run(graph, graph_input, cancel_event=cancel_event)
+        This ordinary entry point implements integrated barrier execution, so
+        it opts in to the `integrated-barrier-policy` capability. The durable
+        entry points do not journal ``BarrierSatisfied`` yet and keep refusing.
+        """
+
+        return await self._run(
+            graph,
+            graph_input,
+            cancel_event=cancel_event,
+            integrated_barrier=True,
+            clock=clock,
+            decision=decision,
+            committed_decisions=committed_decisions,
+        )
 
 
 async def run_graph(
@@ -1553,6 +2317,9 @@ async def run_graph(
     *,
     max_concurrency: int | None = None,
     cancel_event: asyncio.Event | None = None,
+    clock: MonotonicClock | None = None,
+    decision: DecisionContext | None = None,
+    committed_decisions: Sequence[Mapping[str, JsonValue]] | None = None,
 ) -> RunResult:
     """Convenience wrapper for a single scheduler run."""
 
@@ -1560,4 +2327,7 @@ async def run_graph(
         graph,
         graph_input,
         cancel_event=cancel_event,
+        clock=clock,
+        decision=decision,
+        committed_decisions=committed_decisions,
     )

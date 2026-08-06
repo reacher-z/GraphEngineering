@@ -12,7 +12,7 @@
  * the implementation is a table join rather than a materialized file.
  */
 
-import type { CaptureSinkClass, CaptureSourceClass, PolicyControl } from "./codes.js";
+import type { PolicyControl } from "./codes.js";
 import { sinkRow, sourceRow, type SinkPolicyRow, type SourceClassificationRow } from "./inventory.js";
 
 export type FlowOutcome =
@@ -101,13 +101,7 @@ export function evaluateFlow(request: FlowRequest): FlowDecision {
   };
 }
 
-/**
- * Section 1.2 default matrix: `policyEnabled` is true only when the sink row's
- * `defaultEnabled` is true and the source's `defaultAction` is not `off`.
- */
-export function defaultPolicyEnabled(sourceClass: CaptureSourceClass, sink: CaptureSinkClass): boolean {
-  const source = sourceRow(sourceClass);
-  const destination = sinkRow(sink);
-  if (source === undefined || destination === undefined) return false;
-  return destination.defaultEnabled && source.defaultAction !== "off";
-}
+// `defaultPolicyEnabled` used to live here. Its default-matrix condition now
+// lives inside `policyEnabledFor` in guard.ts, intersected with the Section
+// 1.2 explicit-widening formula; a standalone default-matrix predicate had
+// exactly one caller and its result there was constant.

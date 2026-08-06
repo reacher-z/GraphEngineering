@@ -240,11 +240,18 @@ def capture_policy_hash(policy: CapturePolicy) -> str:
 
 
 def control_enabled(policy: CapturePolicy, control: PolicyControl) -> bool:
-    """Whether the effective policy enables one named control."""
+    """Whether the effective policy enables one named control.
+
+    Section 4.1/1.2: a control is enabled when its selected mode permits any
+    payload representation to reach the sink at all.  ``off``, ``codes-only``,
+    and the ``deny`` pseudo-control are the only disabled modes in the closed
+    vocabulary: codes-only means stable codes only, with no payload evidence in
+    any form.  This is the TypeScript lane's ``controlEnabled`` verbatim.
+    """
 
     if control == "deny":
         return False
-    return policy.mode(control) != "off"
+    return policy.mode(control) not in ("off", "codes-only")
 
 
 def policy_enabled_for(policy: CapturePolicy, source_class: str, sink: str) -> bool:
@@ -253,6 +260,14 @@ def policy_enabled_for(policy: CapturePolicy, source_class: str, sink: str) -> b
     The source row's control and every control named by the sink row must be
     enabled.  The default-matrix condition is intersected in as well, because all
     applicable rows must allow the representation and no row may widen another.
+    A pair outside the default matrix is enabled only when the effective policy
+    explicitly widens it, and the widening formula — identical in the TypeScript
+    lane's ``policyEnabledFor`` — is the union of the source row's control and
+    every control named by the sink row: the pair is widened exactly when at
+    least one control in that union selects a mode different from the Section
+    4.1 default stable profile.  The source row's control matters because the
+    operator lever the spec names for attempt-failure evidence,
+    ``errors: "protected-evidence"``, is a mode of the *source* row's control.
     """
 
     from .inventory import source_row
@@ -261,10 +276,10 @@ def policy_enabled_for(policy: CapturePolicy, source_class: str, sink: str) -> b
     destination = sink_row(sink)
     if row is None or destination is None:
         return False
-    # Section 1.2 default matrix. A sink that is off by default stays off until a
-    # future versioned inventory gives it an explicit mapping.
+    # Section 1.2 default matrix. A pair that is off by default stays off until
+    # the effective policy explicitly widens the union of its controls.
     if (not destination.default_enabled or row.default_action == "off") and not _explicitly_widened(
-        policy, destination.policy_controls
+        policy, (row.policy_control, *destination.policy_controls)
     ):
         return False
     if not control_enabled(policy, row.policy_control):

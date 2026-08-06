@@ -14,6 +14,7 @@
     "flowPolicy",
     "sinkPolicyCases",
     "flowCases",
+    "policyEnablementCases",
     "wireCases",
     "pointerCases",
     "semanticCases",
@@ -63,6 +64,12 @@
       "minItems": 16,
       "maxItems": 256,
       "items": { "$ref": "#/$defs/flowCase" }
+    },
+    "policyEnablementCases": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/policyEnablementCase" }
     },
     "wireCases": {
       "type": "array",
@@ -414,6 +421,47 @@
           "else": { "properties": { "code": false } }
         }
       ]
+    },
+    "policyEnablementCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sourceClass", "sink", "policyOverrides", "expected"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "sourceClass": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sink": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "policyOverrides": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "errors": {
+              "enum": [
+                "codes-only",
+                "codes-and-sanitized-message",
+                "redacted",
+                "protected-evidence",
+                "inline-unredacted"
+              ]
+            },
+            "events": {
+              "enum": ["metadata-or-protected", "allow-redacted", "inline-unredacted"]
+            }
+          }
+        },
+        "expected": { "$ref": "#/$defs/policyEnablementExpected" }
+      }
+    },
+    "policyEnablementExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pairEnabled", "evidenceAuthorized", "nodeAttemptFailedDisposition"],
+      "properties": {
+        "pairEnabled": { "type": "boolean" },
+        "evidenceAuthorized": { "type": "boolean" },
+        "nodeAttemptFailedDisposition": {
+          "enum": ["metadata-only", "protected-ref"]
+        }
+      }
     },
     "wireCase": {
       "type": "object",

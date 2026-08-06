@@ -74,6 +74,26 @@ def default_durable_capture_policy(key_ref: str) -> CapturePolicy:
     )
 
 
+def diagnostic_evidence_authorized(policy: CapturePolicy, sink: str) -> bool:
+    """Section 6.1: whether one policy captures raw attempt-failure evidence.
+
+    "Optional raw ``evidenceRef`` / ``evidenceMac`` only under explicit
+    protected-evidence policy": the ``errors`` control — the
+    ``exception-message`` *source* row's control — must itself select
+    ``protected-evidence``.  Widening a sink-side control such as ``events``
+    never substitutes for it.  The mode gate is intersected with the Section
+    1.2 pair-enablement formula (``policy_enabled_for`` here,
+    ``policyEnabledFor`` in the TypeScript lane), whose explicit-widening test
+    spans the union of the source row's control and the sink row's controls.
+    Both language lanes evaluate this same pure predicate, so the same policy
+    yields the same `NodeAttemptFailed` disposition.
+    """
+
+    if policy.errors != "protected-evidence":
+        return False
+    return policy_enabled_for(policy, "exception-message", sink)
+
+
 class PayloadProtection:
     """The configured protection authority for one durable runtime.
 
@@ -160,12 +180,12 @@ class PayloadProtection:
 
         ``exception-message`` has ``default_action='off'``, so the Section 4.1
         default profile captures none and `NodeAttemptFailed` is the
-        metadata-only shape.  An operator who widens the event sink's controls
-        gets the protected shape.  Both language lanes evaluate this same
-        predicate, so the same policy yields the same disposition.
+        metadata-only shape.  The one operator lever that flips it is
+        ``errors: "protected-evidence"``; see
+        :func:`diagnostic_evidence_authorized`.
         """
 
-        return policy_enabled_for(self._policy, "exception-message", EVENT_JOURNAL_SINK)
+        return diagnostic_evidence_authorized(self._policy, EVENT_JOURNAL_SINK)
 
     @property
     def policy_hash(self) -> str:

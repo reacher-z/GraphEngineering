@@ -99,21 +99,6 @@ function spyingJournal(): SchedulerJournal & Record<string, ReturnType<typeof vi
   } as unknown as SchedulerJournal & Record<string, ReturnType<typeof vi.fn>>;
 }
 
-function expectedFailures(graph: GraphSpec): readonly Readonly<Record<string, unknown>>[] {
-  return graph.nodes.flatMap((node, index) => node.kind !== "barrier" ? [] : [{
-    phase: "execute",
-    nodeId: node.id,
-    code: "UNSUPPORTED_RUNTIME_CAPABILITY",
-    message: runtimeCapabilityMessage({
-      ownerNodeId: node.id,
-      capability: INTEGRATED_BARRIER_CAPABILITY,
-      path: `#/nodes/${index}/config`,
-    }),
-    attempt: 0,
-    retryable: false,
-  }]);
-}
-
 describe("integrated barrier durable capability gate", () => {
   it("keeps the corpus capability-gate claim false for this tranche", () => {
     expect(corpus.claims.capabilityGateClaim).toBe(false);
@@ -190,10 +175,11 @@ describe("integrated barrier durable capability gate", () => {
     ]);
   });
 
-  it("keeps the gate closed for the entry point that does not implement it", () => {
-    // The ordinary scheduler now decides integrated barriers, so it opts in.
-    // The durable scheduler does not journal BarrierSatisfied yet, so it keeps
-    // refusing under the same capability name and the default stays closed.
+  it("keeps the gate closed by default and open only by explicit opt-in", () => {
+    // Both the ordinary and the durable scheduler now decide integrated
+    // barriers, and both opt in explicitly. The pure gate itself keeps its
+    // closed default, so any future entry point that does not implement the
+    // contract refuses under the same capability name.
     expect(graphRuntimeCapabilityIssues(multiBarrierGraph, { integratedBarrier: true }))
       .toEqual([]);
     for (const options of [undefined, {}, { integratedBarrier: false }]) {
@@ -233,35 +219,59 @@ describe("integrated barrier durable capability gate", () => {
       .not.toEqual(expect.arrayContaining(["gate-all", "gate-quorum", "gate-percentage"]));
   });
 
-  it("does not inspect externally supplied graph input before refusing", async () => {
-    const executor = vi.fn(() => "never");
-    const hostileInput = new Proxy({}, {
-      ownKeys: () => {
-        throw new Error("graph input must not be inspected during capability preflight");
-      },
-    });
-
-    // The gated durable path still refuses without ever touching the input.
-    const result = await startDurableGraphRun(multiBarrierGraph, hostileInput, {
-      runId: "integrated-barrier-hostile-input",
+  it("executes a claimed exact policy durably instead of refusing it", async () => {
+    // The former refusal pin. The durable scheduler now journals
+    // BarrierSatisfied through the mandatory payload-protection path, so a
+    // claimed exact policy executes with zero barrier executor attempts and no
+    // UNSUPPORTED_RUNTIME_CAPABILITY failure.
+    const graph: GraphSpec = {
+      apiVersion: "graphengineering.reacher-z.github.io/v1alpha1",
+      kind: "Graph",
+      metadata: { name: "durable-claimed-barrier", version: "1" },
+      inputSchema: {},
+      outputSchema: {},
+      entrypoints: ["root"],
+      outputs: { result: { node: "join" } },
+      nodes: [
+        { id: "root", kind: "transform", inputSchema: {}, outputSchema: {}, config: {} },
+        {
+          id: "join",
+          kind: "barrier",
+          inputSchema: {},
+          outputSchema: {},
+          config: {
+            apiVersion: INTEGRATED_BARRIER_API_VERSION,
+            kind: "all",
+            onUnsatisfied: "fail",
+            lateArrival: "ignore",
+          },
+        },
+      ],
+      edges: [{ id: "root-join", from: { node: "root" }, to: { node: "join" } }],
+    } as GraphSpec;
+    const barrierExecutor = vi.fn(() => "never");
+    const result = await startDurableGraphRun(graph, {}, {
+      runId: "durable-claimed-barrier",
       implementationId: "v1",
-      protection: hostileProtection({
-        read: () => {
-          throw new Error("event journal read must not run during capability preflight");
-        },
-        append: async () => {
-          throw new Error("event journal append must not run during capability preflight");
-        },
-      }),
-      executors: { transform: executor, barrier: executor },
+      protection: memoryProtection(),
+      nodeExecutors: { root: () => "ok", join: barrierExecutor },
     });
 
-    expect(result.status).toBe("failed");
-    expect(result.failures).toEqual(expectedFailures(multiBarrierGraph));
-    expect(executor).not.toHaveBeenCalled();
+    expect(result.status).toBe("succeeded");
+    expect(result.failures).toEqual([]);
+    expect(barrierExecutor).not.toHaveBeenCalled();
+    const join = result.nodes.find((node) => node.nodeId === "join");
+    expect(join?.attempts).toBe(0);
+    expect(join?.status).toBe("succeeded");
+    expect(result.decisionEvents?.map((event) => event.type)).toEqual(["BarrierSatisfied"]);
   });
 
-  it("fails durable start and resume with no history read, append or other store call", async () => {
+  it("still fails durable start and resume closed, before any store call, for other capabilities", async () => {
+    // The barrier flip must not weaken the capability-truth preflight: a graph
+    // the durable scheduler still cannot execute (graph state here, beside the
+    // now-supported claimed barriers) is refused before any history read,
+    // append, executor call, or input inspection.
+    const combined: GraphSpec = { ...clone(multiBarrierGraph), stateSchema: {} };
     const read = vi.fn((): AsyncIterable<GraphEventV1Alpha2> => {
       throw new Error("event journal read must not run during capability preflight");
     });
@@ -269,6 +279,11 @@ describe("integrated barrier durable capability gate", () => {
       throw new Error("event store append must not run during capability preflight");
     });
     const executor = vi.fn(() => "never");
+    const hostileInput = new Proxy({}, {
+      ownKeys: () => {
+        throw new Error("graph input must not be inspected during capability preflight");
+      },
+    });
     const options = {
       runId: "integrated-barrier-capability",
       implementationId: "v1",
@@ -276,15 +291,28 @@ describe("integrated barrier durable capability gate", () => {
       executors: { transform: executor, barrier: executor },
     };
 
-    const started = await startDurableGraphRun(multiBarrierGraph, {}, options);
-    const resumed = await resumeDurableGraphRun(multiBarrierGraph, options);
+    const started = await startDurableGraphRun(combined, hostileInput, options);
+    const resumed = await resumeDurableGraphRun(combined, options);
 
     for (const result of [started, resumed]) {
       expect(result.status).toBe("failed");
       expect(result.nodes).toEqual([]);
       expect(result.totalAttempts).toBe(0);
       expect(result.maxObservedConcurrency).toBe(0);
-      expect(result.failures).toEqual(expectedFailures(multiBarrierGraph));
+      // The claimed barriers are supported now, so the single refusal is the
+      // graph-state capability; no barrier refusal is emitted.
+      expect(result.failures).toEqual([{
+        phase: "execute",
+        nodeId: "seed",
+        code: "UNSUPPORTED_RUNTIME_CAPABILITY",
+        message: runtimeCapabilityMessage({
+          ownerNodeId: "seed",
+          capability: "graph-state",
+          path: "#/stateSchema",
+        }),
+        attempt: 0,
+        retryable: false,
+      }]);
     }
     expect(started).toEqual(resumed);
     expect(read).not.toHaveBeenCalled();

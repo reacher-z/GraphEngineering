@@ -8,6 +8,7 @@ import {
   VersionConflictError,
   assertGraphEvent,
   validateGraphEvent,
+  validateGraphEventV1Alpha2,
   type GraphEvent,
 } from "../src/index.js";
 
@@ -160,5 +161,55 @@ describe("MemoryEventStore", () => {
     await expect(
       store.append("run-priority", 0, [null as unknown as GraphEvent]),
     ).rejects.toMatchObject({ code: "PERSISTENCE_VALIDATION" });
+  });
+});
+
+describe("GraphEventV1Alpha2 BarrierSatisfied envelope", () => {
+  const PROTECTED_VALUE_API = "graphengineering.reacher-z.github.io/protected-value/v1alpha1";
+
+  function barrierSatisfied(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    const data = {
+      decisionRef: { apiVersion: PROTECTED_VALUE_API, valueMac: "c".repeat(64) },
+      decisionMac: "c".repeat(64),
+      policyHash: "d".repeat(64),
+      decisionId: "e".repeat(64),
+      satisfied: true,
+      resolution: "satisfied",
+      ...(overrides["data"] as Record<string, unknown> | undefined ?? {}),
+    };
+    return {
+      apiVersion: "graphengineering.reacher-z.github.io/events/v1alpha2",
+      eventId: "evt-6",
+      type: "BarrierSatisfied",
+      timestamp: "2026-07-26T00:00:00Z",
+      runId: "run-1",
+      graphRevision: 1,
+      sequence: 6,
+      nodeId: "gate",
+      payloadHash: "a".repeat(64),
+      capturePolicyHash: "b".repeat(64),
+      redacted: false,
+      payloadDisposition: "protected-ref",
+      ...overrides,
+      data,
+    };
+  }
+
+  it("accepts the protected-ref decision record with node-only identity", () => {
+    expect(validateGraphEventV1Alpha2(barrierSatisfied())).toMatchObject({ valid: true });
+  });
+
+  it("pins exactly one disposition and refuses off-shape records", () => {
+    const rejected: Array<[string, Record<string, unknown>]> = [
+      ["metadata-only disposition", barrierSatisfied({ payloadDisposition: "metadata-only" })],
+      ["an attempt identity", barrierSatisfied({ attempt: 1 })],
+      ["an edge identity", barrierSatisfied({ edgeId: "a-gate" })],
+      ["an unknown resolution", barrierSatisfied({ data: { resolution: "maybe" } })],
+      ["a non-boolean satisfied", barrierSatisfied({ data: { satisfied: "yes" } })],
+      ["a non-hex decision identity", barrierSatisfied({ data: { decisionId: "forged" } })],
+    ];
+    for (const [label, candidate] of rejected) {
+      expect(validateGraphEventV1Alpha2(candidate).valid, label).toBe(false);
+    }
   });
 });

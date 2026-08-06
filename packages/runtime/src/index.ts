@@ -37,6 +37,7 @@ export {
   DURABLE_GRAPH_REVISION,
   ProtectedDurableRun,
   assertPayloadProtection,
+  diagnosticEvidenceAuthorized,
   durableActivityKey,
   type DurableEventDraft,
   type DurablePayloadDraft,
